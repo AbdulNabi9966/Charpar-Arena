@@ -1,5 +1,8 @@
+import { createServer } from "http";
+import { Server as SocketIOServer } from "socket.io";
 import app from "./app";
 import { logger } from "./lib/logger";
+import { setupSocketIO } from "./lib/matchmaker";
 
 const rawPort = process.env["PORT"];
 
@@ -15,11 +18,22 @@ if (Number.isNaN(port) || port <= 0) {
   throw new Error(`Invalid PORT value: "${rawPort}"`);
 }
 
-app.listen(port, (err) => {
+const httpServer = createServer(app);
+
+const io = new SocketIOServer(httpServer, {
+  path: "/api/socket.io",
+  cors: {
+    origin: "*",
+    methods: ["GET", "POST"],
+  },
+});
+
+setupSocketIO(io);
+
+httpServer.listen(port, (err?: Error) => {
   if (err) {
     logger.error({ err }, "Error listening on port");
     process.exit(1);
   }
-
-  logger.info({ port }, "Server listening");
+  logger.info({ port }, "Server listening with Socket.IO");
 });

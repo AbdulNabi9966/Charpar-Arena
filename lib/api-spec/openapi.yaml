@@ -1,22 +1,30 @@
 openapi: 3.1.0
 info:
-  # Do not change the title, if the title changes, the import paths will be broken
   title: Api
   version: 0.1.0
-  description: API specification
+  description: Char Par game platform API
 servers:
   - url: /api
     description: Base API path
 tags:
   - name: health
     description: Health operations
+  - name: auth
+    description: Authentication
+  - name: users
+    description: User management
+  - name: games
+    description: Game management
+  - name: matchmaking
+    description: Matchmaking queue
+  - name: leaderboard
+    description: Leaderboard and stats
 paths:
   /healthz:
     get:
       operationId: healthCheck
       tags: [health]
       summary: Health check
-      description: Returns server health status
       responses:
         "200":
           description: Healthy
@@ -24,6 +32,213 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+
+  /auth/guest:
+    post:
+      operationId: loginAsGuest
+      tags: [auth]
+      summary: Login as guest
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GuestLoginInput"
+      responses:
+        "200":
+          description: Guest session created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthResponse"
+
+  /auth/google:
+    post:
+      operationId: loginWithGoogle
+      tags: [auth]
+      summary: Login with Google OAuth token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GoogleLoginInput"
+      responses:
+        "200":
+          description: Google login success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthResponse"
+
+  /auth/logout:
+    post:
+      operationId: logout
+      tags: [auth]
+      summary: Logout current user
+      responses:
+        "200":
+          description: Logged out
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageResponse"
+
+  /auth/me:
+    get:
+      operationId: getMe
+      tags: [auth]
+      summary: Get current authenticated user
+      responses:
+        "200":
+          description: Current user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "401":
+          description: Not authenticated
+
+  /users/{userId}:
+    get:
+      operationId: getUser
+      tags: [users]
+      summary: Get user profile
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: User profile
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserProfile"
+        "404":
+          description: User not found
+
+  /users/{userId}/stats:
+    get:
+      operationId: getUserStats
+      tags: [users]
+      summary: Get user statistics
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: User stats
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserStats"
+
+  /users/{userId}/history:
+    get:
+      operationId: listMatchHistory
+      tags: [users]
+      summary: Get user match history
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Match history
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/MatchRecord"
+
+  /leaderboard:
+    get:
+      operationId: getLeaderboard
+      tags: [leaderboard]
+      summary: Get global leaderboard
+      parameters:
+        - name: mode
+          in: query
+          schema:
+            type: string
+            enum: [ranked, casual]
+        - name: limit
+          in: query
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Leaderboard entries
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/LeaderboardEntry"
+
+  /leaderboard/summary:
+    get:
+      operationId: getLeaderboardSummary
+      tags: [leaderboard]
+      summary: Get leaderboard summary stats
+      responses:
+        "200":
+          description: Summary stats
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LeaderboardSummary"
+
+  /games:
+    get:
+      operationId: listGames
+      tags: [games]
+      summary: List recent games
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: List of games
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Game"
+
+  /games/{gameId}:
+    get:
+      operationId: getGame
+      tags: [games]
+      summary: Get game details
+      parameters:
+        - name: gameId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Game details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Game"
+        "404":
+          description: Game not found
+
 components:
   schemas:
     HealthStatus:
@@ -34,3 +249,227 @@ components:
       required:
         - status
 
+    MessageResponse:
+      type: object
+      properties:
+        message:
+          type: string
+      required:
+        - message
+
+    GuestLoginInput:
+      type: object
+      properties:
+        username:
+          type: string
+
+    GoogleLoginInput:
+      type: object
+      properties:
+        credential:
+          type: string
+      required:
+        - credential
+
+    AuthResponse:
+      type: object
+      properties:
+        user:
+          $ref: "#/components/schemas/User"
+        token:
+          type: string
+      required:
+        - user
+        - token
+
+    User:
+      type: object
+      properties:
+        id:
+          type: string
+        username:
+          type: string
+        email:
+          type: ["string", "null"]
+        avatar:
+          type: ["string", "null"]
+        isGuest:
+          type: boolean
+        eloRating:
+          type: integer
+        createdAt:
+          type: string
+      required:
+        - id
+        - username
+        - isGuest
+        - eloRating
+        - createdAt
+
+    UserProfile:
+      type: object
+      properties:
+        id:
+          type: string
+        username:
+          type: string
+        avatar:
+          type: ["string", "null"]
+        eloRating:
+          type: integer
+        isGuest:
+          type: boolean
+        stats:
+          $ref: "#/components/schemas/UserStats"
+        createdAt:
+          type: string
+      required:
+        - id
+        - username
+        - eloRating
+        - isGuest
+        - stats
+        - createdAt
+
+    UserStats:
+      type: object
+      properties:
+        totalGames:
+          type: integer
+        wins:
+          type: integer
+        losses:
+          type: integer
+        winRate:
+          type: number
+        currentStreak:
+          type: integer
+        bestStreak:
+          type: integer
+        rankedGames:
+          type: integer
+        rankedWins:
+          type: integer
+      required:
+        - totalGames
+        - wins
+        - losses
+        - winRate
+        - currentStreak
+        - bestStreak
+        - rankedGames
+        - rankedWins
+
+    MatchRecord:
+      type: object
+      properties:
+        id:
+          type: string
+        opponentId:
+          type: string
+        opponentUsername:
+          type: string
+        opponentAvatar:
+          type: ["string", "null"]
+        result:
+          type: string
+          enum: [win, loss]
+        mode:
+          type: string
+          enum: [ranked, casual, ai, local]
+        eloDelta:
+          type: ["integer", "null"]
+        duration:
+          type: ["integer", "null"]
+        playedAt:
+          type: string
+      required:
+        - id
+        - opponentId
+        - opponentUsername
+        - result
+        - mode
+        - playedAt
+
+    LeaderboardEntry:
+      type: object
+      properties:
+        rank:
+          type: integer
+        userId:
+          type: string
+        username:
+          type: string
+        avatar:
+          type: ["string", "null"]
+        eloRating:
+          type: integer
+        wins:
+          type: integer
+        losses:
+          type: integer
+        winRate:
+          type: number
+        currentStreak:
+          type: integer
+      required:
+        - rank
+        - userId
+        - username
+        - eloRating
+        - wins
+        - losses
+        - winRate
+        - currentStreak
+
+    LeaderboardSummary:
+      type: object
+      properties:
+        totalPlayers:
+          type: integer
+        totalGamesPlayed:
+          type: integer
+        topElo:
+          type: integer
+        averageElo:
+          type: integer
+      required:
+        - totalPlayers
+        - totalGamesPlayed
+        - topElo
+        - averageElo
+
+    Game:
+      type: object
+      properties:
+        id:
+          type: string
+        player1Id:
+          type: string
+        player1Username:
+          type: string
+        player2Id:
+          type: ["string", "null"]
+        player2Username:
+          type: ["string", "null"]
+        mode:
+          type: string
+          enum: [ranked, casual, ai, local]
+        status:
+          type: string
+          enum: [waiting, active, completed, abandoned]
+        winnerId:
+          type: ["string", "null"]
+        duration:
+          type: ["integer", "null"]
+        createdAt:
+          type: string
+        completedAt:
+          type: ["string", "null"]
+      required:
+        - id
+        - player1Id
+        - player1Username
+        - mode
+        - status
+        - createdAt
