@@ -4,7 +4,7 @@ import { GamePhase } from '../lib/gameLogic';
 
 type OnlineStatus = 'disconnected' | 'connecting' | 'searching' | 'in_game';
 
-type GameState = {
+export type OnlineGameState = {
   board: (1 | 2 | null)[];
   phase: GamePhase;
   currentPlayer: 1 | 2;
@@ -13,21 +13,53 @@ type GameState = {
   winLine: number[] | null;
 };
 
+// Saved to sessionStorage so a page refresh can reconnect
+type PersistedSession = {
+  gameId: string;
+  playerNum: 1 | 2;
+  opponent: { id: string; username: string };
+  qmode: 'casual' | 'ranked';
+  userId: string;
+  username: string;
+};
+
+const SESSION_KEY = 'char-par-online-session';
+
+export function saveOnlineSession(s: PersistedSession) {
+  sessionStorage.setItem(SESSION_KEY, JSON.stringify(s));
+}
+
+export function loadOnlineSession(): PersistedSession | null {
+  try {
+    const raw = sessionStorage.getItem(SESSION_KEY);
+    return raw ? (JSON.parse(raw) as PersistedSession) : null;
+  } catch {
+    return null;
+  }
+}
+
+export function clearOnlineSession() {
+  sessionStorage.removeItem(SESSION_KEY);
+}
+
 type OnlineState = {
   socket: Socket | null;
   status: OnlineStatus;
   gameId: string | null;
   playerNum: 1 | 2 | null;
   opponent: { id: string; username: string } | null;
-  gameState: GameState | null;
+  gameState: OnlineGameState | null;
   error: string | null;
+  // local UI selection for online board
+  onlineSelected: number | null;
 
   connect: (userId: string, username: string, token: string) => void;
-  joinQueue: (mode: 'casual' | 'ranked') => void;
+  joinQueue: (mode: 'casual' | 'ranked', userId: string, username: string) => void;
   leaveQueue: () => void;
   makeMove: (from: number | null, to: number) => void;
   resign: () => void;
   disconnect: () => void;
+  setOnlineSelected: (pos: number | null) => void;
 };
 
 export const useOnlineStore = create<OnlineState>((set, get) => ({
@@ -38,11 +70,11 @@ export const useOnlineStore = create<OnlineState>((set, get) => ({
   opponent: null,
   gameState: null,
   error: null,
+  onlineSelected: null,
 
   connect: (userId: string, username: string, _token: string) => {
     const existing = get().socket;
     if (existing?.connected) {
-      // Try to reconnect to existing game
       existing.emit('register', { userId, username });
       return;
     }
@@ -53,20 +85,31 @@ export const useOnlineStore = create<OnlineState>((set, get) => ({
       path: '/api/socket.io',
       transports: ['websocket', 'polling'],
       reconnection: true,
-      reconnectionAttempts: 10,
+      reconnectionAttempts: 15,
       reconnectionDelay: 1000,
     });
 
     socket.on('connect', () => {
       socket.emit('register', { userId, username });
-      set({ status: 'disconnected' });
+
+      // If we have a saved session, try to rejoin that game first
+      const saved = loadOnlineSession();
+      if (saved && saved.userId === userId) {
+        socket.emit('rejoin_game', { gameId: saved.gameId, userId, username });
+      }
+
+      // Only reset to disconnected if we weren't already in_game
+      const { status } = get();
+      if (status !== 'in_game') {
+        set({ status: 'disconnected' });
+      }
     });
 
     socket.on('matched', (data: {
       gameId: string;
       playerNumber: 1 | 2;
       opponent: { id: string; username: string };
-      state: GameState;
+      state: OnlineGameState;
     }) => {
       set({
         status: 'in_game',
@@ -74,6 +117,7 @@ export const useOnlineStore = create<OnlineState>((set, get) => ({
         playerNum: data.playerNumber,
         opponent: data.opponent,
         gameState: data.state,
+        onlineSelected: null,
       });
     });
 
@@ -81,7 +125,7 @@ export const useOnlineStore = create<OnlineState>((set, get) => ({
       gameId: string;
       playerNumber: 1 | 2;
       opponent: { id: string; username: string };
-      state: GameState;
+      state: OnlineGameState;
     }) => {
       set({
         status: 'in_game',
@@ -89,7 +133,13 @@ export const useOnlineStore = create<OnlineState>((set, get) => ({
         playerNum: data.playerNumber,
         opponent: data.opponent,
         gameState: data.state,
+        onlineSelected: null,
       });
+      // Update persisted session with fresh state
+      const saved = loadOnlineSession();
+      if (saved) {
+        saveOnlineSession({ ...saved, gameId: data.gameId });
+      }
     });
 
     socket.on('move_made', (data: {
@@ -97,9 +147,9 @@ export const useOnlineStore = create<OnlineState>((set, get) => ({
       from: number | null;
       to: number;
       playerNumber: 1 | 2;
-      state: GameState;
+      state: OnlineGameState;
     }) => {
-      set({ gameState: data.state });
+      set({ gameState: data.state, onlineSelected: null });
     });
 
     socket.on('move_error', (data: { error: string }) => {
@@ -115,7 +165,7 @@ export const useOnlineStore = create<OnlineState>((set, get) => ({
     });
 
     socket.on('opponent_disconnected', () => {
-      set({ error: 'Opponent disconnected. Waiting for reconnect...' });
+      set({ error: 'Opponent disconnected. Waiting for them to reconnect...' });
     });
 
     socket.on('opponent_reconnected', () => {
@@ -127,37 +177,31 @@ export const useOnlineStore = create<OnlineState>((set, get) => ({
       if (gameState) {
         set({
           gameState: { ...gameState, winner: data.winnerPlayerNumber },
-          status: 'disconnected',
-          gameId: null,
         });
       }
+      clearOnlineSession();
     });
 
     socket.on('disconnect', () => {
+      // Keep in_game status — socket.io will auto-reconnect
       const { status } = get();
-      if (status === 'in_game') {
-        // Stay in in_game state — socket.io will try to reconnect
-      } else {
+      if (status !== 'in_game') {
         set({ status: 'disconnected' });
       }
     });
 
     socket.on('connect_error', (err) => {
-      set({ error: `Connection error: ${err.message}`, status: 'disconnected' });
+      set({ error: `Connection error: ${err.message}` });
     });
 
     set({ socket });
   },
 
-  joinQueue: (mode: 'casual' | 'ranked') => {
+  joinQueue: (mode: 'casual' | 'ranked', userId: string, username: string) => {
     const { socket } = get();
     if (!socket?.connected) return;
     set({ status: 'searching' });
-    socket.emit('join_queue', {
-      mode,
-      userId: '', // Will be populated by the socket after register
-      username: '',
-    });
+    socket.emit('join_queue', { mode, userId, username });
   },
 
   leaveQueue: () => {
@@ -177,14 +221,19 @@ export const useOnlineStore = create<OnlineState>((set, get) => ({
     const { socket, gameId, playerNum } = get();
     if (!socket?.connected || !gameId || !playerNum) return;
     socket.emit('resign', { gameId, playerNumber: playerNum });
+    clearOnlineSession();
     set({ status: 'disconnected', gameId: null });
   },
 
   disconnect: () => {
     const { socket } = get();
-    if (socket) {
-      socket.disconnect();
-    }
-    set({ socket: null, status: 'disconnected', gameId: null, opponent: null, playerNum: null, gameState: null });
+    if (socket) socket.disconnect();
+    clearOnlineSession();
+    set({
+      socket: null, status: 'disconnected', gameId: null,
+      opponent: null, playerNum: null, gameState: null, onlineSelected: null,
+    });
   },
+
+  setOnlineSelected: (pos) => set({ onlineSelected: pos }),
 }));
