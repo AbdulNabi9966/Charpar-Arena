@@ -7,6 +7,7 @@ import { Confetti } from '../components/game/Confetti';
 import { useGameStore } from '../store/gameStore';
 import { useOnlineStore, saveOnlineSession, loadOnlineSession, clearOnlineSession } from '../store/onlineStore';
 import { useAuthStore } from '../store/authStore';
+import { useGetMe } from '@workspace/api-client-react';
 import { getAIMove } from '../lib/ai';
 import { getValidMoves, BoardSize } from '../lib/gameLogic';
 import { soundSystem } from '../lib/audio';
@@ -27,6 +28,7 @@ export default function Game() {
   } = useGameStore();
 
   const { token, userId } = useAuthStore();
+  const { data: me } = useGetMe({ query: { enabled: !!token, queryKey: ['auth', 'me'] } });
   const {
     status, connect, disconnect, makeMove, playerNum,
     gameState, opponent, leaveQueue, onlineSelected, setOnlineSelected,
@@ -53,31 +55,35 @@ export default function Game() {
 
     if (mode === 'online') {
       const { status: cur, gameState: curGs } = useOnlineStore.getState();
-      if (cur === 'in_game' && curGs) return;
+      if (cur === 'in_game' && curGs) return; // already in an active game
 
-      const saved    = loadOnlineSession();
       const curUserId = userId;
       if (!curUserId) return;
 
-      const username = saved?.username ?? 'Player';
+      const username = me?.username ?? 'Player';
       connect(curUserId, username, token ?? '');
 
-      const tryJoin = (): boolean => {
+      // After the socket connects, wait a short moment for the server's
+      // 'register' handler to send 'reconnected' (if there's an active game).
+      // If status is still not 'in_game' after that window, join the queue.
+      let joinScheduled = false;
+      const scheduleJoin = (): boolean => {
         const { socket } = useOnlineStore.getState();
-        if (!socket?.connected) return false;
-        if (saved?.userId === curUserId) {
-          // server 'register' handler will auto-reconnect active game
-          useOnlineStore.setState({ status: 'searching' });
-        } else {
-          socket.emit('join_queue', { mode: qmode, userId: curUserId, username, boardSize });
-          useOnlineStore.setState({ status: 'searching' });
-        }
+        if (!socket?.connected || joinScheduled) return !!joinScheduled;
+        joinScheduled = true;
+        setTimeout(() => {
+          const { status: s } = useOnlineStore.getState();
+          if (s !== 'in_game') {
+            socket.emit('join_queue', { mode: qmode, userId: curUserId, username, boardSize });
+            useOnlineStore.setState({ status: 'searching' });
+          }
+        }, 350); // allow 350 ms for 'reconnected' to arrive
         return true;
       };
 
-      if (!tryJoin()) {
-        const iv = setInterval(() => { if (tryJoin()) clearInterval(iv); }, 100);
-        setTimeout(() => clearInterval(iv), 6000);
+      if (!scheduleJoin()) {
+        const iv = setInterval(() => { if (scheduleJoin()) clearInterval(iv); }, 100);
+        setTimeout(() => clearInterval(iv), 10_000);
       }
     }
 

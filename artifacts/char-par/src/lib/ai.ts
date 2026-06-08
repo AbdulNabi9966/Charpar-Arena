@@ -102,43 +102,24 @@ function placementOrderScore(
   pos: number, board: Board, player: Player, size: BoardSize,
 ): number {
   const opp: Player = player === 1 ? 2 : 1;
-  // Immediate win
-  const nb1 = cloneBoard(board); nb1[pos] = player as Cell;
-  if (checkWin(nb1, size).winner === player) return 1_000_000;
-  // Block immediate opponent win
-  const nb2 = cloneBoard(board); nb2[pos] = opp as Cell;
-  if (checkWin(nb2, size).winner === opp) return 900_000;
-  // How many winning lines does this cell touch?
-  let lineScore = 0;
-  for (const line of generateWinLines(size)) {
-    if (!line.includes(pos)) continue;
-    const hasOpp = line.some(i => board[i] === opp);
-    if (!hasOpp) lineScore += 10;
-  }
-  // Centrality
+  const nb = cloneBoard(board);
+  nb[pos] = player as Cell;
+  if (checkWin(nb, size).winner === player) return 1_000_000;
+  nb[pos] = opp as Cell;
+  if (checkWin(nb, size).winner === opp) return 900_000;
+  // Centrality (cheap — no board cloning)
   const mid = Math.floor(size / 2);
   const r = Math.floor(pos / size), c = pos % size;
   const dist = Math.max(Math.abs(r - mid), Math.abs(c - mid));
-  return lineScore + (size - dist) * 20;
+  return (size - dist) * 20;
 }
 
 function movementOrderScore(
   from: number, to: number, board: Board, player: Player, size: BoardSize,
 ): number {
-  const opp: Player = player === 1 ? 2 : 1;
-  // Immediate win
-  const nb1 = cloneBoard(board); nb1[from] = null; nb1[to] = player as Cell;
-  if (checkWin(nb1, size).winner === player) return 1_000_000;
-  // Block immediate opponent win
-  for (let of2 = 0; of2 < size * size; of2++) {
-    if (board[of2] !== opp) continue;
-    for (const t2 of getValidMoves(board, of2, size)) {
-      const nb2 = cloneBoard(board); nb2[of2] = null; nb2[t2] = opp as Cell;
-      if (checkWin(nb2, size).winner === opp) { return t2 === to ? 900_000 : 0; }
-    }
-  }
-  // Evaluate resulting position
+  // One clone, two checks — no nested loops over opponent pieces
   const nb = cloneBoard(board); nb[from] = null; nb[to] = player as Cell;
+  if (checkWin(nb, size).winner === player) return 1_000_000;
   return evaluate(nb, size);
 }
 
@@ -254,12 +235,12 @@ export interface AIMove {
   to: number;
 }
 
-// Search depths — TT + move ordering makes these effectively much deeper than
-// the raw numbers suggest (comparable to ~2× the stated depth without them).
+// Depths are kept conservative so turns stay under ~400ms on average.
+// TT + move ordering give effective strength comparable to ~2× the raw depth.
 const DEPTH: Record<BoardSize, { medium: number; hard: number; expert: number }> = {
-  3: { medium: 3, hard:  6, expert: 10 },
-  4: { medium: 2, hard:  4, expert:  7 },
-  5: { medium: 2, hard:  3, expert:  5 },
+  3: { medium: 2, hard: 4, expert: 6 },
+  4: { medium: 2, hard: 3, expert: 4 },
+  5: { medium: 2, hard: 2, expert: 3 },
 };
 
 export function getAIMove(

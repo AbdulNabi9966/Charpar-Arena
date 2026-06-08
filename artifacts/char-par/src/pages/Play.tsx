@@ -30,26 +30,12 @@ export default function Play() {
   const { data: me } = useGetMe({ query: { enabled: !!token, queryKey: ['auth', 'me'] } });
 
   const handleOnlinePlay = (mode: 'casual' | 'ranked') => {
+    // Pre-warm the socket connection so it is (likely) connected by the time
+    // Game.tsx mounts and calls joinQueue. Game.tsx owns all queue logic.
     const currentUserId = userId ?? me?.id;
-    const username = me?.username ?? 'Guest';
-    if (!currentUserId) return;
-
-    connect(currentUserId, username, token ?? '');
-
-    const waitAndJoin = () => {
-      const { socket } = useOnlineStore.getState();
-      if (socket?.connected) {
-        socket.emit('join_queue', { mode, userId: currentUserId, username, boardSize });
-        useOnlineStore.setState({ status: 'searching' });
-      } else if (socket) {
-        socket.once('connect', () => {
-          socket.emit('join_queue', { mode, userId: currentUserId, username, boardSize });
-          useOnlineStore.setState({ status: 'searching' });
-        });
-      }
-    };
-
-    setTimeout(waitAndJoin, 100);
+    if (currentUserId) {
+      connect(currentUserId, me?.username ?? 'Player', token ?? '');
+    }
     setLocation(`/game?mode=online&qmode=${mode}&boardSize=${boardSize}`);
   };
 
