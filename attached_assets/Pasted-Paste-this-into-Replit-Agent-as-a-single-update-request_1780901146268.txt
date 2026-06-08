@@ -1,0 +1,82 @@
+Paste this into Replit Agent as a single update request:
+
+---
+
+**Update Charpar Arena to support multiple board sizes and scalable win detection.**
+
+### New Game Modes
+
+Add a board-size selector before creating a match:
+
+* 3×3 (existing mode)
+* 4×4 (new)
+* 5×5 (new)
+
+Players should be able to choose the board size when creating a room, and both players must play on the selected board.
+
+### Win Rule (Option A)
+
+Implement scalable win detection:
+
+* 3×3 board → 3 consecutive symbols wins
+* 4×4 board → 4 consecutive symbols wins
+* 5×5 board → 5 consecutive symbols wins
+
+Check all:
+
+* Horizontal lines
+* Vertical lines
+* Diagonal lines
+* Reverse diagonals
+
+### UI Changes
+
+* Add board-size selection buttons/cards.
+* Clearly display the selected board size in the game room.
+* Boards should remain responsive on mobile and desktop.
+* Cell sizes should automatically adjust for larger grids.
+* Keep the existing visual theme and animations.
+
+### Multiplayer
+
+* Ensure real-time synchronization works for 3×3, 4×4, and 5×5 boards.
+* Room data must store board size.
+* Both players should see the same board size and game state.
+
+### Game Logic
+
+* Generate the board dynamically based on selected size.
+* Do not hardcode 3×3 values.
+* Use reusable functions for:
+
+  * Board generation
+  * Move validation
+  * Win checking
+  * Draw detection
+
+### Draw Rules
+
+* If all cells are filled and no winning line exists, declare a draw.
+
+### Statistics
+
+* Existing score tracking, matchmaking, rematch, and room functionality must continue working for all board sizes.
+
+### Performance
+
+* Optimize rendering to avoid lag on 5×5 boards.
+* Keep animations smooth.
+
+### Testing Requirements
+
+Verify:
+
+* 3×3 mode still works exactly as before.
+* 4×4 mode correctly detects 4-in-a-row wins.
+* 5×5 mode correctly detects 5-in-a-row wins.
+* Multiplayer synchronization works correctly.
+* Mobile responsiveness remains intact.
+
+**Goal:** Transform Charpar Arena into a scalable multiplayer game supporting 3×3, 4×4, and 5×5 boards while maintaining the current gameplay experience and real-time multiplayer functionality.
+
+---

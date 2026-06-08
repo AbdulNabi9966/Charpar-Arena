@@ -1,6 +1,6 @@
 import { io, Socket } from 'socket.io-client';
 import { create } from 'zustand';
-import { GamePhase } from '../lib/gameLogic';
+import { GamePhase, BoardSize } from '../lib/gameLogic';
 
 type OnlineStatus = 'disconnected' | 'connecting' | 'searching' | 'in_game';
 
@@ -11,6 +11,7 @@ export type OnlineGameState = {
   piecesPlaced: { 1: number; 2: number };
   winner: 1 | 2 | null;
   winLine: number[] | null;
+  boardSize: BoardSize;
 };
 
 // Saved to sessionStorage so a page refresh can reconnect
@@ -21,6 +22,7 @@ type PersistedSession = {
   qmode: 'casual' | 'ranked';
   userId: string;
   username: string;
+  boardSize: BoardSize;
 };
 
 const SESSION_KEY = 'char-par-online-session';

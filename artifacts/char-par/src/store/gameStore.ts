@@ -1,6 +1,9 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import { Board, Cell, GamePhase, Player, checkWin, getValidMoves } from '../lib/gameLogic';
+import {
+  Board, Cell, GamePhase, Player, BoardSize,
+  checkWin, getValidMoves, createInitialBoard,
+} from '../lib/gameLogic';
 
 type GameMode = 'local' | 'ai';
 
@@ -15,21 +18,24 @@ interface GameState {
   moveHistory: Array<{ player: Player; from: number | null; to: number }>;
   gameMode: GameMode;
   aiDifficulty: 'easy' | 'medium' | 'hard' | 'expert';
+  boardSize: BoardSize;
 
   placePiece: (pos: number) => void;
   selectPiece: (pos: number) => void;
   movePiece: (to: number) => void;
-  /** Atomic AI move — combines select + move in one state update */
+  /** Atomic AI move — select + move in one state update */
   moveAIPiece: (from: number, to: number) => void;
-  resetGame: (mode?: GameMode, difficulty?: 'easy' | 'medium' | 'hard' | 'expert') => void;
+  resetGame: (
+    mode?: GameMode,
+    difficulty?: 'easy' | 'medium' | 'hard' | 'expert',
+    boardSize?: BoardSize,
+  ) => void;
 }
-
-const initialBoard: Board = [null, null, null, null, null, null, null, null, null];
 
 export const useGameStore = create<GameState>()(
   persist(
     (set, get) => ({
-      board: [...initialBoard],
+      board: createInitialBoard(3),
       phase: 'placement',
       currentPlayer: 1,
       piecesPlaced: { 1: 0, 2: 0 },
@@ -39,92 +45,93 @@ export const useGameStore = create<GameState>()(
       moveHistory: [],
       gameMode: 'local',
       aiDifficulty: 'medium',
+      boardSize: 3,
 
       placePiece: (pos) => {
-        const state = get();
-        if (state.winner || state.phase !== 'placement') return;
-        if (state.board[pos] !== null) return;
-        if (state.piecesPlaced[state.currentPlayer] >= 3) return;
+        const s = get();
+        if (s.winner || s.phase !== 'placement') return;
+        if (s.board[pos] !== null) return;
+        if (s.piecesPlaced[s.currentPlayer] >= s.boardSize) return;
 
-        const newBoard = [...state.board] as Board;
-        newBoard[pos] = state.currentPlayer as Cell;
+        const newBoard = [...s.board] as Board;
+        newBoard[pos] = s.currentPlayer as Cell;
 
         const newPiecesPlaced = {
-          ...state.piecesPlaced,
-          [state.currentPlayer]: state.piecesPlaced[state.currentPlayer] + 1,
+          ...s.piecesPlaced,
+          [s.currentPlayer]: s.piecesPlaced[s.currentPlayer] + 1,
         };
-        const { winner, line } = checkWin(newBoard);
-        const newPhase: GamePhase =
-          newPiecesPlaced[1] === 3 && newPiecesPlaced[2] === 3 ? 'movement' : 'placement';
+        const { winner, line } = checkWin(newBoard, s.boardSize);
+        const totalPlaced = newPiecesPlaced[1] + newPiecesPlaced[2];
+        const newPhase: GamePhase = totalPlaced >= 2 * s.boardSize ? 'movement' : 'placement';
 
         set({
           board: newBoard,
           piecesPlaced: newPiecesPlaced,
-          currentPlayer: state.currentPlayer === 1 ? 2 : 1,
+          currentPlayer: s.currentPlayer === 1 ? 2 : 1,
           phase: newPhase,
           winner,
           winLine: line,
           selectedPiece: null,
-          moveHistory: [...state.moveHistory, { player: state.currentPlayer, from: null, to: pos }],
+          moveHistory: [...s.moveHistory, { player: s.currentPlayer, from: null, to: pos }],
         });
       },
 
       selectPiece: (pos) => {
-        const state = get();
-        if (state.winner || state.phase !== 'movement') return;
-        if (state.board[pos] === state.currentPlayer) {
-          set({ selectedPiece: pos });
-        }
+        const s = get();
+        if (s.winner || s.phase !== 'movement') return;
+        if (s.board[pos] === s.currentPlayer) set({ selectedPiece: pos });
       },
 
       movePiece: (to) => {
-        const state = get();
-        if (state.winner || state.phase !== 'movement' || state.selectedPiece === null) return;
+        const s = get();
+        if (s.winner || s.phase !== 'movement' || s.selectedPiece === null) return;
 
-        const valid = getValidMoves(state.board, state.selectedPiece);
+        const valid = getValidMoves(s.board, s.selectedPiece, s.boardSize);
         if (!valid.includes(to)) return;
 
-        const newBoard = [...state.board] as Board;
-        newBoard[state.selectedPiece] = null;
-        newBoard[to] = state.currentPlayer as Cell;
+        const newBoard = [...s.board] as Board;
+        newBoard[s.selectedPiece] = null;
+        newBoard[to] = s.currentPlayer as Cell;
 
-        const { winner, line } = checkWin(newBoard);
+        const { winner, line } = checkWin(newBoard, s.boardSize);
         set({
           board: newBoard,
           selectedPiece: null,
-          currentPlayer: state.currentPlayer === 1 ? 2 : 1,
+          currentPlayer: s.currentPlayer === 1 ? 2 : 1,
           winner,
           winLine: line,
-          moveHistory: [...state.moveHistory, { player: state.currentPlayer, from: state.selectedPiece, to }],
+          moveHistory: [...s.moveHistory, { player: s.currentPlayer, from: s.selectedPiece, to }],
         });
       },
 
       moveAIPiece: (from, to) => {
-        const state = get();
-        if (state.winner || state.phase !== 'movement') return;
-        if (state.board[from] !== state.currentPlayer) return;
+        const s = get();
+        if (s.winner || s.phase !== 'movement') return;
+        if (s.board[from] !== s.currentPlayer) return;
 
-        const valid = getValidMoves(state.board, from);
+        const valid = getValidMoves(s.board, from, s.boardSize);
         if (!valid.includes(to)) return;
 
-        const newBoard = [...state.board] as Board;
+        const newBoard = [...s.board] as Board;
         newBoard[from] = null;
-        newBoard[to] = state.currentPlayer as Cell;
+        newBoard[to] = s.currentPlayer as Cell;
 
-        const { winner, line } = checkWin(newBoard);
+        const { winner, line } = checkWin(newBoard, s.boardSize);
         set({
           board: newBoard,
           selectedPiece: null,
-          currentPlayer: state.currentPlayer === 1 ? 2 : 1,
+          currentPlayer: s.currentPlayer === 1 ? 2 : 1,
           winner,
           winLine: line,
-          moveHistory: [...state.moveHistory, { player: state.currentPlayer, from, to }],
+          moveHistory: [...s.moveHistory, { player: s.currentPlayer, from, to }],
         });
       },
 
-      resetGame: (mode?, difficulty?) => {
+      resetGame: (mode?, difficulty?, boardSize?) => {
+        const cur = get();
+        const newSize = boardSize ?? cur.boardSize;
         set({
-          board: [...initialBoard],
+          board: createInitialBoard(newSize),
           phase: 'placement',
           currentPlayer: 1,
           piecesPlaced: { 1: 0, 2: 0 },
@@ -132,8 +139,9 @@ export const useGameStore = create<GameState>()(
           winner: null,
           winLine: null,
           moveHistory: [],
-          gameMode: mode ?? get().gameMode,
-          aiDifficulty: difficulty ?? get().aiDifficulty,
+          gameMode: mode ?? cur.gameMode,
+          aiDifficulty: difficulty ?? cur.aiDifficulty,
+          boardSize: newSize,
         });
       },
     }),
@@ -149,6 +157,7 @@ export const useGameStore = create<GameState>()(
         moveHistory: s.moveHistory,
         gameMode: s.gameMode,
         aiDifficulty: s.aiDifficulty,
+        boardSize: s.boardSize,
       }),
     }
   )
