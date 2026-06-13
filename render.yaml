@@ -1,4 +1,3 @@
-# render.yaml - Place in the same folder as pnpm-workspace.yaml
 services:
   - type: web
     name: charpar-backend
@@ -8,7 +7,7 @@ services:
     buildCommand: |
       corepack enable
       corepack prepare pnpm@latest --activate
-      pnpm install --frozen-lockfile --ignore-scripts
+      pnpm install --frozen-lockfile
       pnpm run build
     startCommand: pnpm start
     envVars:
