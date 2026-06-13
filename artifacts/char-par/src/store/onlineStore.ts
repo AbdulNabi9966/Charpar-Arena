@@ -83,12 +83,20 @@ export const useOnlineStore = create<OnlineState>((set, get) => ({
 
     set({ status: 'connecting', error: null });
 
-    const socket = io('/', {
-      path: '/api/socket.io',
-      transports: ['websocket', 'polling'],
-      reconnection: true,
-      reconnectionAttempts: 15,
-      reconnectionDelay: 1000,
+    // const socket = io('/', {
+    //   path: '/api/socket.io',
+    //   transports: ['websocket', 'polling'],
+    //   reconnection: true,
+    //   reconnectionAttempts: 15,
+    //   reconnectionDelay: 1000,
+    // });
+
+    const socket = io('https://charpar-arena.onrender.com', {
+  path: '/api/socket.io',
+  transports: ['websocket', 'polling'],
+  reconnection: true,
+  reconnectionAttempts: 15,
+  reconnectionDelay: 1000,
     });
 
     socket.on('connect', () => {
