@@ -1,6 +1,6 @@
 import { motion, AnimatePresence } from 'framer-motion';
 import { useGameStore } from '../../store/gameStore';
-import { getValidMoves, BoardSize } from '../../lib/gameLogic';
+import { getValidMoves, generateAdjacency, BoardSize } from '../../lib/gameLogic';
 import { soundSystem } from '../../lib/audio';
 
 interface BoardProps {
@@ -39,6 +39,37 @@ function getCenters(size: BoardSize): number[] {
   return Array.from({ length: size }, (_, i) => PAD + i * (cellSize + GAP) + cellSize / 2);
 }
 
+/** Returns (x, y) pixel center for a cell index */
+function cellCenter(index: number, size: BoardSize, centers: number[]): [number, number] {
+  const row = Math.floor(index / size);
+  const col = index % size;
+  return [centers[col], centers[row]];
+}
+
+/** Build unique edge list from adjacency map (each pair listed once) */
+function buildEdges(size: BoardSize): [number, number][] {
+  const adj = generateAdjacency(size);
+  const edges: [number, number][] = [];
+  const seen = new Set<string>();
+  for (let i = 0; i < size * size; i++) {
+    for (const j of adj[i] ?? []) {
+      const key = i < j ? `${i}-${j}` : `${j}-${i}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        edges.push([Math.min(i, j), Math.max(i, j)]);
+      }
+    }
+  }
+  return edges;
+}
+
+/** Determine if an edge is diagonal (not purely H or V) */
+function isDiagonal(a: number, b: number, size: BoardSize): boolean {
+  const ar = Math.floor(a / size), ac = a % size;
+  const br = Math.floor(b / size), bc = b % size;
+  return ar !== br && ac !== bc;
+}
+
 export function Board({
   overrideBoard, overrideSelected, overrideValidMoves, overrideBoardSize, onCellClick,
 }: BoardProps) {
@@ -54,6 +85,7 @@ export function Board({
   const isOnline   = !!overrideBoard;
   const cfg        = CONFIG[boardSize];
   const centers    = getCenters(boardSize);
+  const edges      = buildEdges(boardSize);
 
   const validMoves = overrideValidMoves ??
     (!isOnline && phase === 'movement' && selected !== null
@@ -83,43 +115,29 @@ export function Board({
     }
   };
 
-  const lineOpacity = '0.10';
-  const diagOpacity = '0.07';
-
   return (
     <div className="relative w-full max-w-[420px] aspect-square mx-auto select-none">
-      {/* SVG connection lines */}
+      {/* SVG connection lines — drawn from the actual adjacency map */}
       <svg
         className="absolute inset-0 w-full h-full pointer-events-none z-0"
         viewBox={`0 0 ${BOARD_PX} ${BOARD_PX}`}
         xmlns="http://www.w3.org/2000/svg"
       >
-        {/* Horizontal lines */}
-        {centers.map((cy, r) => (
-          <line key={`h${r}`}
-            x1={centers[0]} y1={cy} x2={centers[boardSize - 1]} y2={cy}
-            stroke={`rgba(255,255,255,${lineOpacity})`} strokeWidth="1.5"
-          />
-        ))}
-        {/* Vertical lines */}
-        {centers.map((cx, c) => (
-          <line key={`v${c}`}
-            x1={cx} y1={centers[0]} x2={cx} y2={centers[boardSize - 1]}
-            stroke={`rgba(255,255,255,${lineOpacity})`} strokeWidth="1.5"
-          />
-        ))}
-        {/* Main diagonal */}
-        <line
-          x1={centers[0]} y1={centers[0]}
-          x2={centers[boardSize - 1]} y2={centers[boardSize - 1]}
-          stroke={`rgba(255,255,255,${diagOpacity})`} strokeWidth="1.5"
-        />
-        {/* Anti-diagonal */}
-        <line
-          x1={centers[boardSize - 1]} y1={centers[0]}
-          x2={centers[0]} y2={centers[boardSize - 1]}
-          stroke={`rgba(255,255,255,${diagOpacity})`} strokeWidth="1.5"
-        />
+        {edges.map(([a, b]) => {
+          const [x1, y1] = cellCenter(a, boardSize, centers);
+          const [x2, y2] = cellCenter(b, boardSize, centers);
+          const diag = isDiagonal(a, b, boardSize);
+          return (
+            <line
+              key={`${a}-${b}`}
+              x1={x1} y1={y1} x2={x2} y2={y2}
+              stroke={diag
+                ? 'rgba(255,255,255,0.07)'
+                : 'rgba(255,255,255,0.12)'}
+              strokeWidth={diag ? '1.2' : '1.5'}
+            />
+          );
+        })}
       </svg>
 
       {/* Cell grid */}

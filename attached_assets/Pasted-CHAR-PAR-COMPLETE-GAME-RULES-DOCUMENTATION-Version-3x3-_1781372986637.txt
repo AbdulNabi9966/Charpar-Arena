@@ -1,0 +1,251 @@
+CHAR PAR - COMPLETE GAME RULES DOCUMENTATION
+Version: 3x3 | 4x4 | 5x5
+🎯 GAME OVERVIEW
+Char Par is a two-player strategic board game played on a grid. Each player has pieces of their color (Red 🔴 vs Blue 🔵). The goal is to get your pieces in a straight line (horizontally, vertically, or diagonally).
+
+Board Size	Grid	Pieces Per Player	Win Length	Total Winning Lines
+3x3	3×3	3 pieces	3 in a row	8 lines
+4x4	4×4	4 pieces	4 in a row	10 lines
+5x5	5×5	5 pieces	5 in a row	12 lines
+🎮 GAME PHASES
+Phase 1: Placement Phase
+Rules:
+
+Players take turns placing pieces on ANY empty cell
+
+You can place anywhere on the board (no movement restrictions)
+
+Each player must place ALL their pieces before moving
+
+Turn Order by Board Size:
+
+Board Size	Player 1 Places	Player 2 Places	Total Placement Turns
+3x3	Turns 1, 3, 5	Turns 2, 4, 6	6 turns
+4x4	Turns 1, 3, 5, 7	Turns 2, 4, 6, 8	8 turns
+5x5	Turns 1, 3, 5, 7, 9	Turns 2, 4, 6, 8, 10	10 turns
+Phase 2: Movement Phase
+Rules:
+
+After all pieces are placed, movement phase begins
+
+Click on YOUR piece to select it (golden ring appears)
+
+Click on an adjacent empty cell to move
+
+You can move any of your pieces each turn
+
+Cannot jump over pieces
+
+Cannot capture opponent's pieces
+
+Cannot move to occupied cells
+
+🗺️ BOARD LAYOUTS & POSITIONS
+3x3 Board Layout
+text
+    0 — 1 — 2
+    | \ | / |
+    3 — 4 — 5
+    | / | \ |
+    6 — 7 — 8
+4x4 Board Layout
+text
+    0 — 1 — 2 — 3
+    |   |   |   |
+    4 — 5 — 6 — 7
+    |   |   |   |
+    8 — 9 —10 —11
+    |   |   |   |
+   12 —13 —14 —15
+5x5 Board Layout
+text
+    0 — 1 — 2 — 3 — 4
+    |   |   |   |   |
+    5 — 6 — 7 — 8 — 9
+    |   |   |   |   |
+   10 —11 —12 —13 —14
+    |   |   |   |   |
+   15 —16 —17 —18 —19
+    |   |   |   |   |
+   20 —21 —22 —23 —24
+📍 ADJACENCY RULES (Movement)
+3x3 Adjacency Map
+Position	Connects To
+0	1, 3, 4
+1	0, 2, 4
+2	1, 4, 5
+3	0, 4, 6
+4	0, 1, 2, 3, 5, 6, 7, 8
+5	2, 4, 8
+6	3, 4, 7
+7	4, 6, 8
+8	4, 5, 7
+4x4 Adjacency Map
+Position	Connects To
+0	1, 4, 5
+1	0, 2, 5
+2	1, 3, 6
+3	2, 6, 7
+4	0, 5, 8
+5	0, 1, 4, 6, 9, 10
+6	2, 3, 5, 7, 9, 10
+7	3, 6, 11
+8	4, 9, 12
+9	5, 6, 8, 10, 12, 13
+10	5, 6, 9, 11, 14
+11	7, 10, 15
+12	8, 9, 13
+13	9, 12, 14
+14	10, 13, 15
+15	10, 11, 14
+5x5 Adjacency Map
+Row 0 (Top Row)
+Position	Connects To
+0	1, 5, 6
+1	0, 2, 6
+2	1, 3, 7
+3	2, 4, 8
+4	3, 8, 9
+Row 1
+Position	Connects To
+5	0, 6, 10
+6	0, 1, 5, 7, 11, 12
+7	2, 6, 8, 12
+8	3, 4, 7, 9, 12, 13
+9	4, 8, 14
+Row 2 (Middle Row)
+Position	Connects To
+10	5, 11, 15
+11	6, 10, 12, 16
+12	6, 7, 8, 11, 13, 16, 17, 18
+13	8, 12, 14, 18
+14	9, 13, 19
+Row 3
+Position	Connects To
+15	10, 16, 20
+16	11, 12, 15, 17, 20, 21
+17	12, 16, 18, 22
+18	12, 13, 17, 19, 23, 24
+19	14, 18, 24
+Row 4 (Bottom Row)
+Position	Connects To
+20	15, 16, 21
+21	16, 20, 22
+22	17, 21, 23
+23	18, 22, 24
+24	18, 19, 23
+🏆 WINNING CONDITIONS
+Winning Lines by Board Size
+3x3 Winning Lines (8 total)
+Type	Lines
+Horizontal	[0,1,2], [3,4,5], [6,7,8]
+Vertical	[0,3,6], [1,4,7], [2,5,8]
+Diagonal	[0,4,8], [2,4,6]
+4x4 Winning Lines (10 total)
+Type	Lines
+Horizontal	[0,1,2,3], [4,5,6,7], [8,9,10,11], [12,13,14,15]
+Vertical	[0,4,8,12], [1,5,9,13], [2,6,10,14], [3,7,11,15]
+Diagonal	[0,5,10,15], [3,6,9,12]
+5x5 Winning Lines (12 total)
+Type	Lines
+Horizontal	5 rows of 5 cells each
+Vertical	5 columns of 5 cells each
+Diagonal	[0,6,12,18,24], [4,8,12,16,20]
+📊 CONNECTION POWER RANKINGS
+3x3 Most Powerful Positions
+Rank	Position	Connections
+1	4 (Center)	8
+2	0,2,6,8 (Corners)	3
+3	1,3,5,7 (Edges)	3
+4x4 Most Powerful Positions
+Rank	Position	Connections
+1	5,6,9	6
+2	10	5
+3	0,1,2,3,4,7,8,11,12,13,14,15	3
+5x5 Most Powerful Positions
+Rank	Position	Connections
+1	12	8
+2	6,8,16,18	6
+3	7,11,13,17	4
+4	0,1,2,3,4,5,9,10,14,15,19,20,21,22,23,24	3
+🎮 HOW TO PLAY - STEP BY STEP
+Step 1: Choose Board Size
+Select 3x3 (Classic/Easy)
+
+Select 4x4 (Medium)
+
+Select 5x5 (Hard/Expert)
+
+Step 2: Placement Phase
+Player 1 (Red) places first piece on ANY empty cell
+
+Player 2 (Blue) places piece on ANY empty cell
+
+Continue until all pieces are placed
+
+Step 3: Movement Phase
+Click on YOUR piece to select it
+
+Valid moves will be highlighted
+
+Click on an adjacent empty cell to move
+
+Continue until someone wins
+
+Step 4: Winning
+First player to get required pieces in a row wins!
+
+Winning line is highlighted in green
+
+Click "Play Again" to start new game
+
+✅ RULES SUMMARY
+Action	3x3	4x4	5x5
+Place on empty cell	✅	✅	✅
+Place on occupied cell	❌	❌	❌
+Move to adjacent cell	✅	✅	✅
+Move to non-adjacent cell	❌	❌	❌
+Move to occupied cell	❌	❌	❌
+Jump over pieces	❌	❌	❌
+Capture opponent piece	❌	❌	❌
+Skip turn	❌	❌	❌
+Move opponent's piece	❌	❌	❌
+💡 STRATEGY TIPS
+For 3x3
+Control the center (position 4)
+
+Corners are defensive positions
+
+Create two winning threats at once
+
+For 4x4
+Control positions 5,6,9 (6 connections each)
+
+Position 10 is also very powerful (5 connections)
+
+Build slowly - need 4 in a row
+
+For 5x5
+Control the exact center (position 12) - 8 connections!
+
+Inner ring positions (6,8,16,18) have 6 connections each
+
+Plan 3-4 moves ahead
+
+Watch both diagonals through center
+
+🎯 GAME COMPARISON
+Feature	3x3	4x4	5x5
+Difficulty	Easy	Medium	Hard
+Game Duration	3-5 min	5-10 min	10-20 min
+Strategic Depth	Low	Medium	High
+Best For	Beginners	Intermediate	Advanced/Competitive
+📝 NOTES
+Only 2 diagonals count as winning lines (main diagonal and anti-diagonal)
+
+Movement follows the adjacency maps defined above
+
+Center cells are always the most powerful positions
+
+Corners have the fewest movement options
+
