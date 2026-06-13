@@ -1,9 +1,10 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useLocation } from 'wouter';
 import { Layout } from '../components/layout/Layout';
 import { Board } from '../components/game/Board';
 import { Matchmaking } from '../components/game/Matchmaking';
 import { Confetti } from '../components/game/Confetti';
+import { RulesModal } from '../components/game/RulesModal';
 import { useGameStore } from '../store/gameStore';
 import { useOnlineStore, saveOnlineSession, loadOnlineSession, clearOnlineSession } from '../store/onlineStore';
 import { useAuthStore } from '../store/authStore';
@@ -33,6 +34,8 @@ export default function Game() {
     status, connect, disconnect, makeMove, playerNum,
     gameState, opponent, leaveQueue, onlineSelected, setOnlineSelected,
   } = useOnlineStore();
+
+  const [rulesOpen, setRulesOpen] = useState(false);
 
   const aiPending   = useRef(false);
   const initialized = useRef(false);
@@ -246,6 +249,13 @@ export default function Game() {
             <div className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-secondary/60 text-secondary-foreground/70 text-xs">
               {activeBoardSize}×{activeBoardSize}
             </div>
+            <button
+              onClick={() => setRulesOpen(true)}
+              className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-secondary/60 text-secondary-foreground/70 text-xs hover:bg-secondary hover:text-secondary-foreground transition-colors"
+              title="View rules"
+            >
+              📖
+            </button>
           </div>
 
           <h2 className="text-2xl font-bold tracking-tight h-8">
@@ -334,6 +344,8 @@ export default function Game() {
           </button>
         )}
       </div>
+
+      <RulesModal open={rulesOpen} onClose={() => setRulesOpen(false)} />
     </Layout>
   );
 }
