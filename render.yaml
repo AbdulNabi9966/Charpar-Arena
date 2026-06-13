@@ -17,7 +17,7 @@ services:
       - key: PORT
         value: 3001
       - key: CLIENT_URL
-        value: https://your-frontend.vercel.app
+        value: https://charpar.vercel.app
       - key: DATABASE_URL
         sync: false
     healthCheckPath: /health
