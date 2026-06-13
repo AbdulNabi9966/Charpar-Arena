@@ -1,0 +1,23 @@
+# render.yaml - Place in the same folder as pnpm-workspace.yaml
+services:
+  - type: web
+    name: charpar-backend
+    runtime: node
+    plan: free
+    rootDir: artifacts/api-server
+    buildCommand: |
+      corepack enable
+      corepack prepare pnpm@latest --activate
+      pnpm install --frozen-lockfile --ignore-scripts
+      pnpm run build
+    startCommand: pnpm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 3001
+      - key: CLIENT_URL
+        value: https://your-frontend.vercel.app
+      - key: DATABASE_URL
+        sync: false
+    healthCheckPath: /health
