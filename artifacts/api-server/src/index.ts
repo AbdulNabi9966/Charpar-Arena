@@ -20,11 +20,20 @@ if (Number.isNaN(port) || port <= 0) {
 
 const httpServer = createServer(app);
 
+// const io = new SocketIOServer(httpServer, {
+//   path: "/api/socket.io",
+//   cors: {
+//     origin: "*",
+//     methods: ["GET", "POST"],
+//   },
+// });
+
 const io = new SocketIOServer(httpServer, {
   path: "/api/socket.io",
   cors: {
-    origin: "*",
+    origin: ["https://charpar.vercel.app"],
     methods: ["GET", "POST"],
+    credentials: true,
   },
 });
 
