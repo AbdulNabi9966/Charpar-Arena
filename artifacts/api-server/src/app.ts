@@ -26,7 +26,15 @@ app.use(
   }),
 );
 
-app.use(cors());
+// app.use(cors());
+
+app.use(
+  cors({
+    origin: ["https://charpar-frontend.vercel.app"],
+    credentials: true,
+  })
+);
+
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
