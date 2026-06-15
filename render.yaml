@@ -7,8 +7,11 @@ services:
     buildCommand: |
       corepack enable
       corepack prepare pnpm@latest --activate
+      # Go to root to install and run migrations
+      cd ../..
       pnpm install --frozen-lockfile
-      pnpm run render-build
+      pnpm run db:migrate
+      pnpm run build
     startCommand: pnpm start
     envVars:
       - key: NODE_ENV
