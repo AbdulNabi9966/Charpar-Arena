@@ -33,6 +33,7 @@ export default function Game() {
   const {
     status, connect, disconnect, makeMove, playerNum,
     gameState, opponent, leaveQueue, onlineSelected, setOnlineSelected, winReason,
+    requestRematch, declineRematch, isWaitingForRematch,
   } = useOnlineStore();
 
   const [rulesOpen, setRulesOpen] = useState(false);
@@ -203,6 +204,23 @@ export default function Game() {
 
   const activeBoardSize = mode === 'online' ? onlineBoardSize : storedBoardSize;
 
+  // ── Rematch event listener ──────────────────────────────────────────────
+useEffect(() => {
+  if (mode !== 'online') return;
+  
+  const handleRematchOffer = () => {
+    const accept = window.confirm('Opponent wants a rematch! Accept?');
+    if (accept) {
+      requestRematch();
+    } else {
+      declineRematch();
+    }
+  };
+  
+  window.addEventListener('rematch-offered', handleRematchOffer);
+  return () => window.removeEventListener('rematch-offered', handleRematchOffer);
+}, [mode, requestRematch, declineRematch]);
+
   // ── Matchmaking screen ────────────────────────────────────────────────────
   if (mode === 'online' && status !== 'in_game') {
     return (
@@ -332,24 +350,36 @@ export default function Game() {
 
         {/* End-game buttons */}
         {effectiveWinner && (
-          <div className="mt-10 flex gap-4 animate-in fade-in slide-in-from-bottom-4 relative z-10">
-            <button
-              onClick={() => {
-                if (mode === 'online') { disconnect(); setLocation('/play'); }
-                else resetGame(mode as 'local' | 'ai', difficulty, storedBoardSize);
-              }}
-              className="bg-primary text-primary-foreground px-8 py-3 rounded-lg font-medium hover:bg-primary/90 transition-colors"
-            >
-              {mode === 'online' ? 'Find New Match' : 'Play Again'}
-            </button>
-            <button
-              onClick={() => setLocation('/play')}
-              className="bg-secondary text-secondary-foreground px-8 py-3 rounded-lg font-medium hover:bg-secondary/80 transition-colors"
-            >
-              Exit
-            </button>
-          </div>
-        )}
+  <div className="mt-10 flex gap-4 animate-in fade-in slide-in-from-bottom-4 relative z-10 flex-wrap justify-center">
+    {/* Rematch button - only for online mode */}
+    {mode === 'online' && (
+      <button
+        onClick={requestRematch}
+        disabled={isWaitingForRematch}
+        className="bg-emerald-500 text-white px-8 py-3 rounded-lg font-medium hover:bg-emerald-600 transition-colors disabled:opacity-50"
+      >
+        {isWaitingForRematch ? 'Waiting for opponent...' : 'Request Rematch'}
+      </button>
+    )}
+    
+    <button
+      onClick={() => {
+        if (mode === 'online') { disconnect(); setLocation('/play'); }
+        else resetGame(mode as 'local' | 'ai', difficulty, storedBoardSize);
+      }}
+      className="bg-primary text-primary-foreground px-8 py-3 rounded-lg font-medium hover:bg-primary/90 transition-colors"
+    >
+      {mode === 'online' ? 'Find New Match' : 'Play Again'}
+    </button>
+    
+    <button
+      onClick={() => setLocation('/play')}
+      className="bg-secondary text-secondary-foreground px-8 py-3 rounded-lg font-medium hover:bg-secondary/80 transition-colors"
+    >
+      Exit
+    </button>
+  </div>
+)}
 
         {/* Resign (online) */}
         {mode === 'online' && !effectiveWinner && status === 'in_game' && (
