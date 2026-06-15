@@ -29,6 +29,7 @@ interface ActiveGame {
   boardSize: BoardSize;
   state: GameState;
   startedAt: number;
+  rematchRequested?: string[]; // Add this line
 }
 
 // Separate queue per (mode, boardSize) — players can only match same board size
@@ -116,6 +117,10 @@ async function finalizeGame(
       opponentUsername: winnerUsername, result: "loss", mode: game.mode,
       eloDelta: loserEloDelta, duration },
   ]);
+
+  // Notify players game is over before cleanup
+  io.to(game.player1SocketId).emit("game_completed", { gameId, winnerId, winnerUsername });
+  io.to(game.player2SocketId).emit("game_completed", { gameId, winnerId, winnerUsername });
 
   activeGames.delete(gameId);
   socketToGame.delete(game.player1SocketId);
@@ -267,6 +272,13 @@ export function setupSocketIO(io: Server): void {
       if (game.state.winner) {
         const winnerId = game.state.winner === 1 ? game.player1Id : game.player2Id;
         const loserId  = game.state.winner === 1 ? game.player2Id : game.player1Id;
+        
+        // Emit game over event
+        const winnerPlayerNum = game.state.winner;
+        const payload = { gameId: data.gameId, winnerPlayerNumber: winnerPlayerNum, reason: "win" };
+        io.sockets.sockets.get(game.player1SocketId)?.emit("game_over", payload);
+        io.sockets.sockets.get(game.player2SocketId)?.emit("game_over", payload);
+        
         finalizeGame(data.gameId, winnerId, loserId, io)
           .catch(err => logger.error({ err }, "Failed to finalize game"));
       }
@@ -286,6 +298,102 @@ export function setupSocketIO(io: Server): void {
 
       finalizeGame(data.gameId, winnerId, loserId, io)
         .catch(err => logger.error({ err }, "Failed to finalize resigned game"));
+    });
+
+    // Rematch handlers
+    socket.on("request_rematch", async (data: { gameId: string }) => {
+      const game = activeGames.get(data.gameId);
+      if (!game) {
+        socket.emit("rematch_error", { error: "Game not found" });
+        return;
+      }
+
+      // Store rematch request
+      if (!game.rematchRequested) {
+        game.rematchRequested = [];
+      }
+      
+      const userId = socketToUser.get(socket.id)?.userId;
+      if (!userId) return;
+      
+      if (!game.rematchRequested.includes(userId)) {
+        game.rematchRequested.push(userId);
+      }
+      
+      // Notify opponent
+      const opponentSocketId = game.player1SocketId === socket.id 
+        ? game.player2SocketId 
+        : game.player1SocketId;
+      io.sockets.sockets.get(opponentSocketId)?.emit("rematch_offered", { by: userId });
+      
+      // If both want rematch, create new game
+      if (game.rematchRequested.length === 2) {
+        // Get player info
+        const player1 = socketToUser.get(game.player1SocketId);
+        const player2 = socketToUser.get(game.player2SocketId);
+        
+        if (player1 && player2) {
+          // Create new game with same players
+          const newGameId = crypto.randomUUID();
+          const state = createInitialState(game.boardSize);
+          
+          const newGame: ActiveGame = {
+            gameId: newGameId,
+            player1SocketId: game.player1SocketId,
+            player2SocketId: game.player2SocketId,
+            player1Id: game.player1Id,
+            player2Id: game.player2Id,
+            player1Username: game.player1Username,
+            player2Username: game.player2Username,
+            mode: game.mode,
+            boardSize: game.boardSize,
+            state: state,
+            startedAt: Date.now(),
+          };
+          
+          activeGames.set(newGameId, newGame);
+          socketToGame.set(game.player1SocketId, newGameId);
+          socketToGame.set(game.player2SocketId, newGameId);
+          
+          await createGameRecord(newGame);
+          
+          // Notify both players
+          io.sockets.sockets.get(game.player1SocketId)?.emit("matched", {
+            gameId: newGameId,
+            playerNumber: 1,
+            opponent: { id: game.player2Id, username: game.player2Username },
+            state: state,
+            isRematch: true
+          });
+          
+          io.sockets.sockets.get(game.player2SocketId)?.emit("matched", {
+            gameId: newGameId,
+            playerNumber: 2,
+            opponent: { id: game.player1Id, username: game.player1Username },
+            state: state,
+            isRematch: true
+          });
+          
+          // Clean up old game reference
+          delete game.rematchRequested;
+          
+          logger.info({ oldGameId: data.gameId, newGameId, players: [player1.userId, player2.userId] }, "Rematch started");
+        }
+      }
+    });
+
+    socket.on("decline_rematch", (data: { gameId: string }) => {
+      const game = activeGames.get(data.gameId);
+      if (!game) return;
+      
+      // Notify opponent that rematch was declined
+      const opponentSocketId = game.player1SocketId === socket.id 
+        ? game.player2SocketId 
+        : game.player1SocketId;
+      io.sockets.sockets.get(opponentSocketId)?.emit("rematch_declined");
+      
+      // Clear rematch requests
+      delete game.rematchRequested;
     });
 
     socket.on("disconnect", () => {
