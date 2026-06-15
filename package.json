@@ -9,6 +9,15 @@
     "typecheck": "pnpm run typecheck:libs",
     "render-build": "pnpm --filter \"./artifacts/api-server\" run build"
   },
+  {
+  "scripts": {
+    "render-build": "pnpm run db:migrate && pnpm run build",
+    "db:migrate": "cd ../db && pnpm run migrate",
+    "db:generate": "cd ../db && pnpm run generate",
+    "build": "your-existing-build-command",
+    "start": "your-existing-start-command"
+  }
+},
   "private": true,
   "devDependencies": {
     "prettier": "^3.8.3",
