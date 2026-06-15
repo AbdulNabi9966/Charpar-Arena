@@ -9,15 +9,6 @@
     "serve": "vite preview --config vite.config.ts --host 0.0.0.0",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
-
-  {
-  "rewrites": [
-    {
-      "source": "/(.*)",
-      "destination": "/index.html"
-    }
-  ]
-},
   
   "devDependencies": {
     "@hookform/resolvers": "^3.10.0",
