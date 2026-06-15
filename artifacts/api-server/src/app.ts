@@ -26,9 +26,12 @@ app.use(
   }),
 );
 
-// Get allowed origins from environment variable
+// CORS configuration
 const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(",") || [
   "https://charpar-frontend.vercel.app",
+  "https://charpar-frontend-gj5wvbdfk-abdulnabi9966s-projects.vercel.app",
+  "http://localhost:3000",
+  "http://localhost:5173",
 ];
 
 console.log("CORS allowed origins:", allowedOrigins);
@@ -36,9 +39,7 @@ console.log("CORS allowed origins:", allowedOrigins);
 app.use(
   cors({
     origin: function (origin, callback) {
-      // Allow requests with no origin (like mobile apps or curl)
       if (!origin) return callback(null, true);
-      
       if (allowedOrigins.indexOf(origin) !== -1) {
         callback(null, true);
       } else {
@@ -69,7 +70,7 @@ app.get("/", (_req, res) => {
 // API routes
 app.use("/api", router);
 
-// 404 handler (must be LAST)
+// ✅ FIXED: 404 handler - NO '*' parameter
 app.use((_req, res) => {
   res.status(404).json({
     status: "error",
