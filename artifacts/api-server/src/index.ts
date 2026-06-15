@@ -31,7 +31,7 @@ const httpServer = createServer(app);
 const io = new SocketIOServer(httpServer, {
   path: "/api/socket.io",
   cors: {
-    origin: ["https://charpar.vercel.app"],
+    origin: ["https://charpar-frontend.vercel.app"],
     methods: ["GET", "POST"],
     credentials: true,
   },
