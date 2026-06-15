@@ -1,0 +1,15 @@
+{
+  "builds": [
+    {
+      "src": "artifacts/frontend/**",
+      "use": "@vercel/static-build"
+    }
+  ],
+  "routes": [
+    {
+      "src": "/(.*)",
+      "dest": "/artifacts/frontend/$1"
+    }
+  ],
+  "installCommand": "cd artifacts/frontend && pnpm install"
+}
