@@ -62,14 +62,18 @@ type OnlineState = {
   onlineCounts: OnlineCounts | null;
   // local UI selection for online board
   onlineSelected: number | null;
+  isWaitingForRematch: boolean;
 
   connect: (userId: string, username: string, token: string) => void;
-  joinQueue: (mode: 'casual' | 'ranked', userId: string, username: string) => void;
+  joinQueue: (mode: 'casual' | 'ranked', userId: string, username: string, boardSize?: BoardSize) => void;
   leaveQueue: () => void;
   makeMove: (from: number | null, to: number) => void;
   resign: () => void;
   disconnect: () => void;
   setOnlineSelected: (pos: number | null) => void;
+  requestRematch: () => void;
+  declineRematch: () => void;
+  clearRematch: () => void;
 };
 
 export const useOnlineStore = create<OnlineState>((set, get) => ({
@@ -83,6 +87,7 @@ export const useOnlineStore = create<OnlineState>((set, get) => ({
   winReason: null,
   onlineCounts: null,
   onlineSelected: null,
+  isWaitingForRematch: false,
 
   connect: (userId: string, username: string, _token: string) => {
     const existing = get().socket;
@@ -93,21 +98,13 @@ export const useOnlineStore = create<OnlineState>((set, get) => ({
 
     set({ status: 'connecting', error: null });
 
-    // const socket = io('/', {
-    //   path: '/api/socket.io',
-    //   transports: ['websocket', 'polling'],
-    //   reconnection: true,
-    //   reconnectionAttempts: 15,
-    //   reconnectionDelay: 1000,
-    // });
-
-    const socket = io(import.meta.env.VITE_API_URL, {
-  path: '/api/socket.io',
-  transports: ['websocket', 'polling'],
-  reconnection: true,
-  reconnectionAttempts: 15,
-  reconnectionDelay: 1000,
-});
+    const socket = io(import.meta.env.VITE_API_URL || 'https://charpar-arena.onrender.com', {
+      path: '/api/socket.io',
+      transports: ['websocket', 'polling'],
+      reconnection: true,
+      reconnectionAttempts: 15,
+      reconnectionDelay: 1000,
+    });
 
     socket.on('connect', () => {
       socket.emit('register', { userId, username });
@@ -130,7 +127,19 @@ export const useOnlineStore = create<OnlineState>((set, get) => ({
       playerNumber: 1 | 2;
       opponent: { id: string; username: string };
       state: OnlineGameState;
+      isRematch?: boolean;
     }) => {
+      // Save session for reconnection
+      saveOnlineSession({
+        gameId: data.gameId,
+        playerNum: data.playerNumber,
+        opponent: data.opponent,
+        qmode: 'casual',
+        userId,
+        username,
+        boardSize: data.state.boardSize,
+      });
+      
       set({
         status: 'in_game',
         gameId: data.gameId,
@@ -138,7 +147,14 @@ export const useOnlineStore = create<OnlineState>((set, get) => ({
         opponent: data.opponent,
         gameState: data.state,
         onlineSelected: null,
+        isWaitingForRematch: false,
+        error: null,
       });
+      
+      // If this is a rematch, notify UI
+      if (data.isRematch) {
+        window.dispatchEvent(new CustomEvent('rematch-started', { detail: data }));
+      }
     });
 
     socket.on('reconnected', (data: {
@@ -154,6 +170,7 @@ export const useOnlineStore = create<OnlineState>((set, get) => ({
         opponent: data.opponent,
         gameState: data.state,
         onlineSelected: null,
+        error: null,
       });
       // Update persisted session with fresh state
       const saved = loadOnlineSession();
@@ -174,9 +191,11 @@ export const useOnlineStore = create<OnlineState>((set, get) => ({
 
     socket.on('move_error', (data: { error: string }) => {
       set({ error: data.error });
+      // Clear error after 3 seconds
+      setTimeout(() => set({ error: null }), 3000);
     });
 
-    socket.on('queued', () => {
+    socket.on('queued', (data: { position?: number; mode?: string; boardSize?: number }) => {
       set({ status: 'searching' });
     });
 
@@ -198,9 +217,38 @@ export const useOnlineStore = create<OnlineState>((set, get) => ({
         set({
           gameState: { ...gameState, winner: data.winnerPlayerNumber },
           winReason: data.reason ?? null,
+          isWaitingForRematch: false,
         });
       }
+      // Don't clear session immediately - allow rematch
+      // clearOnlineSession();
+    });
+
+    socket.on('game_completed', (data: { gameId: string; winnerId: string; winnerUsername: string }) => {
+      // Game is fully finalized, ready for rematch
+      console.log('Game completed:', data);
+    });
+
+    // Rematch event handlers
+    socket.on('rematch_offered', (data: { by: string }) => {
+      set({ error: null });
+      // Emit a custom event that your UI can listen for
+      window.dispatchEvent(new CustomEvent('rematch-offered', { detail: data }));
+    });
+
+    socket.on('rematch_declined', () => {
+      set({ 
+        error: 'Opponent declined the rematch',
+        isWaitingForRematch: false,
+      });
       clearOnlineSession();
+      setTimeout(() => {
+        set({ status: 'disconnected', gameId: null, error: null });
+      }, 3000);
+    });
+
+    socket.on('rematch_error', (data: { error: string }) => {
+      set({ error: data.error, isWaitingForRematch: false });
     });
 
     socket.on('disconnect', () => {
@@ -222,11 +270,14 @@ export const useOnlineStore = create<OnlineState>((set, get) => ({
     set({ socket });
   },
 
-  joinQueue: (mode: 'casual' | 'ranked', userId: string, username: string) => {
+  joinQueue: (mode: 'casual' | 'ranked', userId: string, username: string, boardSize: BoardSize = 3) => {
     const { socket } = get();
-    if (!socket?.connected) return;
-    set({ status: 'searching' });
-    socket.emit('join_queue', { mode, userId, username });
+    if (!socket?.connected) {
+      set({ error: 'Not connected to server' });
+      return;
+    }
+    set({ status: 'searching', error: null });
+    socket.emit('join_queue', { mode, userId, username, boardSize });
   },
 
   leaveQueue: () => {
@@ -241,7 +292,6 @@ export const useOnlineStore = create<OnlineState>((set, get) => ({
     if (!socket?.connected || !gameId || !playerNum || !gameState) return;
 
     // Optimistic update: apply the move locally for instant visual feedback.
-    // The server's authoritative state (move_made event) overwrites this shortly after.
     const newBoard = [...gameState.board] as (1 | 2 | null)[];
     newBoard[to] = playerNum;
     if (from !== null) newBoard[from] = null;
@@ -256,7 +306,13 @@ export const useOnlineStore = create<OnlineState>((set, get) => ({
     const newPhase = gameState.phase === 'placement' && allPlaced ? 'movement' : gameState.phase;
 
     set({
-      gameState: { ...gameState, board: newBoard, piecesPlaced: newPiecesPlaced, currentPlayer: nextPlayer, phase: newPhase },
+      gameState: { 
+        ...gameState, 
+        board: newBoard, 
+        piecesPlaced: newPiecesPlaced, 
+        currentPlayer: nextPlayer, 
+        phase: newPhase 
+      },
       onlineSelected: null,
     });
 
@@ -268,7 +324,12 @@ export const useOnlineStore = create<OnlineState>((set, get) => ({
     if (!socket?.connected || !gameId || !playerNum) return;
     socket.emit('resign', { gameId, playerNumber: playerNum });
     clearOnlineSession();
-    set({ status: 'disconnected', gameId: null, winReason: null });
+    set({ 
+      status: 'disconnected', 
+      gameId: null, 
+      winReason: null,
+      isWaitingForRematch: false,
+    });
   },
 
   disconnect: () => {
@@ -276,11 +337,45 @@ export const useOnlineStore = create<OnlineState>((set, get) => ({
     if (socket) socket.disconnect();
     clearOnlineSession();
     set({
-      socket: null, status: 'disconnected', gameId: null,
-      opponent: null, playerNum: null, gameState: null,
-      onlineSelected: null, winReason: null,
+      socket: null, 
+      status: 'disconnected', 
+      gameId: null,
+      opponent: null, 
+      playerNum: null, 
+      gameState: null,
+      onlineSelected: null, 
+      winReason: null,
+      isWaitingForRematch: false,
+      error: null,
     });
   },
 
   setOnlineSelected: (pos) => set({ onlineSelected: pos }),
+
+  requestRematch: () => {
+    const { socket, gameId, isWaitingForRematch } = get();
+    if (!socket?.connected || !gameId) {
+      set({ error: 'Cannot request rematch: not connected' });
+      return;
+    }
+    if (isWaitingForRematch) {
+      set({ error: 'Already waiting for rematch response' });
+      return;
+    }
+    set({ isWaitingForRematch: true, error: null });
+    socket.emit('request_rematch', { gameId });
+  },
+
+  declineRematch: () => {
+    const { socket, gameId } = get();
+    if (!socket?.connected || !gameId) return;
+    set({ isWaitingForRematch: false });
+    socket.emit('decline_rematch', { gameId });
+    clearOnlineSession();
+    set({ status: 'disconnected', gameId: null });
+  },
+
+  clearRematch: () => {
+    set({ isWaitingForRematch: false });
+  },
 }));
