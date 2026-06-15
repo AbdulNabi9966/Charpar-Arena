@@ -20,20 +20,19 @@ if (Number.isNaN(port) || port <= 0) {
 
 const httpServer = createServer(app);
 
-// CORS for Socket.IO - must match frontend
+// Get allowed origins from environment
+const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(",") || [
+  "https://charpar-frontend.vercel.app",
+];
+
 const io = new SocketIOServer(httpServer, {
   path: "/api/socket.io",
   cors: {
-    origin: [
-      "https://charpar-frontend.vercel.app",
-      "https://charpar-frontend-gj5wvbdfk-abdulnabi9966s-projects.vercel.app",
-      "http://localhost:3000",
-      "http://localhost:5173",
-    ],
+    origin: allowedOrigins,
     methods: ["GET", "POST"],
     credentials: true,
   },
-  transports: ["websocket", "polling"], // Add this for better compatibility
+  transports: ["websocket", "polling"],
 });
 
 setupSocketIO(io);
