@@ -67,7 +67,7 @@ app.get("/", (_req, res) => {
   });
 });
 
-// API routes
+// API routes - MOUNT THIS BEFORE ANY WILDCARD
 app.use("/api", router);
 
 // ✅ FIXED: 404 handler - NO '*' parameter
@@ -77,5 +77,7 @@ app.use((_req, res) => {
     message: "Route not found",
   });
 });
+
+// ❌ DO NOT add any app.get('*') or app.use('*') here
 
 export default app;
