@@ -180,6 +180,9 @@ export function setupSocketIO(io: Server): void {
     socket.on("register", (data: { userId: string; username: string }) => {
       socketToUser.set(socket.id, { userId: data.userId, username: data.username });
 
+      // Send current counts directly to this socket so it sees them immediately
+      broadcastOnlineCounts(io);
+
       // Reconnect to active game if one exists for this user
       for (const [gameId, game] of activeGames.entries()) {
         if (game.player1Id === data.userId || game.player2Id === data.userId) {

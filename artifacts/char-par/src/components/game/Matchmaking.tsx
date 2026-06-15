@@ -14,14 +14,17 @@ export function Matchmaking({ boardSize = 3 }: MatchmakingProps) {
 
   const [countdown, setCountdown] = useState(TIMEOUT_SECS);
   const [phase, setPhase] = useState<'searching' | 'no_players' | 'connecting_ai'>('searching');
-  const searchStarted = useRef(false);
 
-  // Start countdown only once status becomes 'searching'
+  // Stable refs — avoid stale closures in timeout callbacks
+  const boardSizeRef = useRef(boardSize);
+  boardSizeRef.current = boardSize;
+  const leaveQueueRef = useRef(leaveQueue);
+  leaveQueueRef.current = leaveQueue;
+  const setLocationRef = useRef(setLocation);
+  setLocationRef.current = setLocation;
+
+  // ── Countdown: start immediately on mount ─────────────────────────────────
   useEffect(() => {
-    if (status !== 'searching') return;
-    if (searchStarted.current) return;
-    searchStarted.current = true;
-
     const interval = setInterval(() => {
       setCountdown(prev => {
         if (prev <= 1) {
@@ -31,37 +34,46 @@ export function Matchmaking({ boardSize = 3 }: MatchmakingProps) {
         return prev - 1;
       });
     }, 1000);
-
     return () => clearInterval(interval);
-  }, [status]);
+  }, []); // runs once on mount
 
-  // When countdown hits 0, leave queue and show fallback UI
+  // ── When countdown hits 0: leave queue → no_players → connecting_ai → navigate
+  // NOTE: `phase` is intentionally NOT in the deps array — including it would
+  // cause React to run the cleanup (clearTimeout) when we call setPhase(),
+  // which cancels the very timeout we just scheduled.
   useEffect(() => {
-    if (countdown === 0 && phase === 'searching') {
-      leaveQueue();
-      setPhase('no_players');
+    if (countdown !== 0) return;
 
-      const t = setTimeout(() => {
-        setPhase('connecting_ai');
-        setTimeout(() => {
-          setLocation(`/game?mode=ai&difficulty=expert&boardSize=${boardSize}`);
-        }, 1500);
-      }, 1800);
+    // Use ref so we don't need phase as a dep
+    const currentPhase = phase;
+    if (currentPhase !== 'searching') return;
 
-      return () => clearTimeout(t);
-    }
-  }, [countdown, phase, leaveQueue, boardSize, setLocation]);
+    leaveQueueRef.current();
+    setPhase('no_players');
 
-  const total = onlineCounts?.total ?? 0;
+    const t1 = setTimeout(() => setPhase('connecting_ai'), 1400);
+    const t2 = setTimeout(() => {
+      setLocationRef.current(`/game?mode=ai&difficulty=expert&boardSize=${boardSizeRef.current}`);
+    }, 3200); // 1400ms "no players" + 1800ms "connecting AI" display
+
+    return () => {
+      clearTimeout(t1);
+      clearTimeout(t2);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [countdown]); // only re-run when countdown changes — NOT phase
+
+  const total = onlineCounts?.total ?? null; // null = not yet received
   const playing = onlineCounts?.playing ?? {};
   const searching = onlineCounts?.searching ?? {};
-
   const sizes = [3, 4, 5] as const;
+
+  const isSearching = phase === 'searching';
 
   return (
     <div className="flex flex-col items-center justify-center min-h-[420px] w-full max-w-sm mx-auto px-4">
 
-      {/* Pulse animation */}
+      {/* Pulse ring */}
       <div className="relative flex items-center justify-center w-32 h-32 mb-7">
         {phase === 'searching' && (
           <>
@@ -74,76 +86,83 @@ export function Matchmaking({ boardSize = 3 }: MatchmakingProps) {
           <div className="absolute inset-0 rounded-full border-2 border-yellow-500/40" />
         )}
         {phase === 'connecting_ai' && (
-          <div className="absolute inset-0 rounded-full border-2 border-emerald-500/50 animate-ping" style={{ animationDuration: '1.2s' }} />
+          <div className="absolute inset-0 rounded-full border-2 border-emerald-500/50 animate-ping" style={{ animationDuration: '1s' }} />
         )}
         <div className="absolute inset-12 rounded-full border border-primary/70" />
         <div className={[
-          'relative w-5 h-5 rounded-full shadow-[0_0_20px_rgba(var(--primary),0.8)]',
-          phase === 'no_players' ? 'bg-yellow-400' :
-          phase === 'connecting_ai' ? 'bg-emerald-400' : 'bg-primary',
+          'relative w-5 h-5 rounded-full',
+          phase === 'no_players'    ? 'bg-yellow-400  shadow-[0_0_16px_rgba(250,204,21,0.7)]' :
+          phase === 'connecting_ai' ? 'bg-emerald-400 shadow-[0_0_16px_rgba(52,211,153,0.7)]' :
+                                      'bg-primary     shadow-[0_0_20px_rgba(var(--primary),0.8)]',
         ].join(' ')} />
       </div>
 
-      {/* Status text */}
+      {/* Status heading */}
       {phase === 'searching' && (
-        <>
-          <h3 className="text-xl font-semibold tracking-tight mb-1">
-            {status === 'connecting' ? 'Connecting...' : 'Searching for opponent...'}
-          </h3>
-          {status === 'searching' && (
-            <div className="flex items-center gap-2 mb-1">
-              <span className="text-muted-foreground text-sm tabular-nums">
-                {countdown} second{countdown !== 1 ? 's' : ''} remaining
-              </span>
-              {/* Countdown bar */}
-              <div className="w-20 h-1 bg-muted rounded-full overflow-hidden">
-                <div
-                  className="h-full bg-primary rounded-full transition-all duration-1000"
-                  style={{ width: `${(countdown / TIMEOUT_SECS) * 100}%` }}
-                />
-              </div>
-            </div>
-          )}
-          <p className="text-muted-foreground text-xs mb-6 text-center">
-            Matched automatically — no room codes needed.
-          </p>
-        </>
+        <h3 className="text-xl font-semibold tracking-tight mb-2">
+          {status === 'connecting' ? 'Connecting...' : 'Searching for opponent...'}
+        </h3>
+      )}
+      {phase === 'no_players' && (
+        <h3 className="text-xl font-semibold tracking-tight text-yellow-400 mb-2">No players found.</h3>
+      )}
+      {phase === 'connecting_ai' && (
+        <h3 className="text-xl font-semibold tracking-tight text-emerald-400 mb-2">Connecting with AI Expert...</h3>
       )}
 
-      {phase === 'no_players' && (
-        <>
-          <h3 className="text-xl font-semibold tracking-tight text-yellow-400 mb-1">No players found.</h3>
-          <p className="text-muted-foreground text-sm mb-6 text-center">Connecting you with AI Expert...</p>
-        </>
+      {/* Countdown bar — always visible during searching phase */}
+      {isSearching && (
+        <div className="w-full mb-2">
+          <div className="flex items-center justify-between mb-1.5 text-xs text-muted-foreground">
+            <span>Searching...</span>
+            <span className="tabular-nums font-medium">
+              {countdown}s remaining
+            </span>
+          </div>
+          <div className="w-full h-1.5 bg-muted rounded-full overflow-hidden">
+            <div
+              className="h-full bg-primary rounded-full transition-all duration-1000 ease-linear"
+              style={{ width: `${(countdown / TIMEOUT_SECS) * 100}%` }}
+            />
+          </div>
+        </div>
       )}
 
       {phase === 'connecting_ai' && (
-        <>
-          <h3 className="text-xl font-semibold tracking-tight text-emerald-400 mb-1">Connecting you with AI Expert...</h3>
-          <p className="text-muted-foreground text-sm mb-6 text-center">Get ready — the AI plays at expert level.</p>
-        </>
+        <p className="text-muted-foreground text-sm mb-2 text-center">
+          Get ready — the AI plays at expert level.
+        </p>
+      )}
+
+      {phase === 'searching' && (
+        <p className="text-muted-foreground text-xs mb-5 text-center">
+          {countdown <= 3
+            ? 'Almost done — connecting you to AI Expert if no one joins...'
+            : 'Matched automatically. No room codes needed.'}
+        </p>
       )}
 
       {/* Cancel button */}
-      {phase === 'searching' && status === 'searching' && (
+      {isSearching && (
         <button
-          onClick={() => { leaveQueue(); setLocation('/play'); }}
-          className="px-6 py-2 rounded-full border border-border text-sm font-medium hover:bg-muted transition-colors mb-8"
+          onClick={() => { leaveQueueRef.current(); setLocationRef.current('/play'); }}
+          className="px-6 py-2 rounded-full border border-border text-sm font-medium hover:bg-muted transition-colors mb-6"
         >
           Cancel
         </button>
       )}
 
-      {/* Online counts */}
-      <div className="w-full mt-auto pt-6 border-t border-border/60">
+      {/* Online counts panel */}
+      <div className="w-full mt-auto pt-5 border-t border-border/60">
         <div className="flex items-center justify-between mb-3">
           <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Players Online</p>
           <div className="flex items-center gap-1.5">
             <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-            <span className="text-xs font-semibold tabular-nums">{total}</span>
+            <span className="text-xs font-semibold tabular-nums">
+              {total === null ? '—' : total}
+            </span>
           </div>
         </div>
-
         <div className="grid grid-cols-3 gap-2">
           {sizes.map(size => {
             const play = playing[size] ?? 0;
@@ -158,10 +177,9 @@ export function Matchmaking({ boardSize = 3 }: MatchmakingProps) {
                   </div>
                   <div className="flex items-center justify-between text-xs">
                     <span className="text-muted-foreground">Waiting</span>
-                    <span className={[
-                      'font-semibold tabular-nums',
-                      wait > 0 ? 'text-emerald-400' : '',
-                    ].join(' ')}>{wait}</span>
+                    <span className={['font-semibold tabular-nums', wait > 0 ? 'text-emerald-400' : ''].join(' ')}>
+                      {wait}
+                    </span>
                   </div>
                 </div>
               </div>
