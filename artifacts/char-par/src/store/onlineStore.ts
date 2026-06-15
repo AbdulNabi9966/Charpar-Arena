@@ -237,8 +237,29 @@ export const useOnlineStore = create<OnlineState>((set, get) => ({
   },
 
   makeMove: (from: number | null, to: number) => {
-    const { socket, gameId, playerNum } = get();
-    if (!socket?.connected || !gameId || !playerNum) return;
+    const { socket, gameId, playerNum, gameState } = get();
+    if (!socket?.connected || !gameId || !playerNum || !gameState) return;
+
+    // Optimistic update: apply the move locally for instant visual feedback.
+    // The server's authoritative state (move_made event) overwrites this shortly after.
+    const newBoard = [...gameState.board] as (1 | 2 | null)[];
+    newBoard[to] = playerNum;
+    if (from !== null) newBoard[from] = null;
+
+    const newPiecesPlaced = from === null
+      ? { ...gameState.piecesPlaced, [playerNum]: gameState.piecesPlaced[playerNum] + 1 }
+      : { ...gameState.piecesPlaced };
+
+    const nextPlayer = (playerNum === 1 ? 2 : 1) as 1 | 2;
+    const bsz = gameState.boardSize;
+    const allPlaced = newPiecesPlaced[1] >= bsz && newPiecesPlaced[2] >= bsz;
+    const newPhase = gameState.phase === 'placement' && allPlaced ? 'movement' : gameState.phase;
+
+    set({
+      gameState: { ...gameState, board: newBoard, piecesPlaced: newPiecesPlaced, currentPlayer: nextPlayer, phase: newPhase },
+      onlineSelected: null,
+    });
+
     socket.emit('make_move', { gameId, playerNumber: playerNum, from, to });
   },
 
