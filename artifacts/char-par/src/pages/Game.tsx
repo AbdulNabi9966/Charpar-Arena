@@ -206,7 +206,7 @@ export default function Game() {
     return (
       <Layout>
         <div className="flex-1 flex items-center justify-center">
-          <Matchmaking />
+          <Matchmaking boardSize={boardSize} />
         </div>
       </Layout>
     );

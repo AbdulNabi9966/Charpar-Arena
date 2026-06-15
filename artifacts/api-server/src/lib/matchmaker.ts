@@ -45,6 +45,25 @@ function queueKey(mode: "casual" | "ranked", boardSize: BoardSize): string {
   return `${mode}-${boardSize}`;
 }
 
+function broadcastOnlineCounts(io: Server): void {
+  const total = io.sockets.sockets.size;
+
+  const playing: Record<number, number> = { 3: 0, 4: 0, 5: 0 };
+  for (const game of activeGames.values()) {
+    playing[game.boardSize] = (playing[game.boardSize] ?? 0) + 2;
+  }
+
+  const searching: Record<number, number> = { 3: 0, 4: 0, 5: 0 };
+  for (const [key, queue] of Object.entries(queues)) {
+    const size = parseInt(key.split("-")[1]);
+    if (size === 3 || size === 4 || size === 5) {
+      searching[size] = (searching[size] ?? 0) + queue.length;
+    }
+  }
+
+  io.emit("online_counts", { total, playing, searching });
+}
+
 async function createGameRecord(game: ActiveGame): Promise<void> {
   await db.insert(gamesTable).values({
     id: game.gameId,
@@ -156,6 +175,7 @@ function removeFromAllQueues(match: Partial<{ userId: string; socketId: string }
 export function setupSocketIO(io: Server): void {
   io.on("connection", (socket: Socket) => {
     logger.info({ socketId: socket.id }, "Socket connected");
+    broadcastOnlineCounts(io);
 
     socket.on("register", (data: { userId: string; username: string }) => {
       socketToUser.set(socket.id, { userId: data.userId, username: data.username });
@@ -212,6 +232,7 @@ export function setupSocketIO(io: Server): void {
 
       socket.emit("queued", { position: queue.length, mode: data.mode, boardSize });
       tryMatch(queue, data.mode, boardSize, io);
+      broadcastOnlineCounts(io);
 
       logger.info({ userId: data.userId, mode: data.mode, boardSize, queueSize: queue.length }, "Player joined queue");
     });
@@ -219,6 +240,7 @@ export function setupSocketIO(io: Server): void {
     socket.on("leave_queue", () => {
       removeFromAllQueues({ socketId: socket.id });
       socket.emit("queue_left");
+      broadcastOnlineCounts(io);
     });
 
     socket.on("make_move", (data: { gameId: string; playerNumber: Player; from: number | null; to: number }) => {
@@ -278,6 +300,7 @@ export function setupSocketIO(io: Server): void {
 
       removeFromAllQueues({ socketId: socket.id });
       socketToUser.delete(socket.id);
+      broadcastOnlineCounts(io);
     });
   });
 }

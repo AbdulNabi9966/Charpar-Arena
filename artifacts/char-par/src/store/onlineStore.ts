@@ -44,6 +44,12 @@ export function clearOnlineSession() {
   sessionStorage.removeItem(SESSION_KEY);
 }
 
+export type OnlineCounts = {
+  total: number;
+  playing: Record<number, number>;
+  searching: Record<number, number>;
+};
+
 type OnlineState = {
   socket: Socket | null;
   status: OnlineStatus;
@@ -52,6 +58,7 @@ type OnlineState = {
   opponent: { id: string; username: string } | null;
   gameState: OnlineGameState | null;
   error: string | null;
+  onlineCounts: OnlineCounts | null;
   // local UI selection for online board
   onlineSelected: number | null;
 
@@ -72,6 +79,7 @@ export const useOnlineStore = create<OnlineState>((set, get) => ({
   opponent: null,
   gameState: null,
   error: null,
+  onlineCounts: null,
   onlineSelected: null,
 
   connect: (userId: string, username: string, _token: string) => {
@@ -202,6 +210,10 @@ export const useOnlineStore = create<OnlineState>((set, get) => ({
 
     socket.on('connect_error', (err) => {
       set({ error: `Connection error: ${err.message}` });
+    });
+
+    socket.on('online_counts', (data: OnlineCounts) => {
+      set({ onlineCounts: data });
     });
 
     set({ socket });
