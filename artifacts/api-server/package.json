@@ -10,16 +10,6 @@
     "dev": "NODE_ENV=development npm run build && npm run start",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
-  {
-  "name": "@workspace/db",
-  "scripts": {
-    "push": "drizzle-kit push --config ./drizzle.config.ts",
-    "push-force": "drizzle-kit push --force --config ./drizzle.config.ts",
-    "generate": "drizzle-kit generate --config ./drizzle.config.ts",
-    "migrate": "drizzle-kit migrate --config ./drizzle.config.ts",
-    "studio": "drizzle-kit studio --config ./drizzle.config.ts"
-  }
-},
   "dependencies": {
     "@workspace/api-zod": "workspace:*",
     "@workspace/db": "workspace:*",
