@@ -7,10 +7,13 @@ services:
     buildCommand: |
       corepack enable
       corepack prepare pnpm@latest --activate
-      # Go to root to install and run migrations
+      # Go to project root (2 levels up from api-server)
       cd ../..
       pnpm install --frozen-lockfile
+      # Run migration from root (which will use the db package)
       pnpm run db:migrate
+      # Go back to api-server and build
+      cd artifacts/api-server
       pnpm run build
     startCommand: pnpm start
     envVars:
