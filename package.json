@@ -7,36 +7,10 @@
     "build": "pnpm --filter \"./artifacts/api-server\" run build",
     "typecheck:libs": "tsc --build",
     "typecheck": "pnpm run typecheck:libs",
-    "render-build": "pnpm --filter \"./artifacts/api-server\" run build"
-  },
-  {
-  "name": "workspace",
-  "version": "0.0.0",
-  "license": "MIT",
-  "scripts": {
-    "preinstall": "sh -c 'rm -f package-lock.json yarn.lock; case \"$npm_config_user_agent\" in pnpm/*) ;; *) echo \"Use pnpm instead\" >&2; exit 1 ;; esac'",
-    "build": "pnpm --filter \"./artifacts/api-server\" run build",
-    "typecheck:libs": "tsc --build",
-    "typecheck": "pnpm run typecheck:libs",
     "db:generate": "cd artifacts/db && pnpm run generate",
     "db:migrate": "cd artifacts/db && pnpm run migrate",
     "render-build": "pnpm run db:migrate && pnpm run build"
   },
-  "private": true,
-  "devDependencies": {
-    "prettier": "^3.8.3",
-    "typescript": "~5.9.3"
-  }
-},
-  {
-  "scripts": {
-    "render-build": "pnpm run db:migrate && pnpm run build",
-    "db:migrate": "cd ../db && pnpm run migrate",
-    "db:generate": "cd ../db && pnpm run generate",
-    "build": "your-existing-build-command",
-    "start": "your-existing-start-command"
-  }
-},
   "private": true,
   "devDependencies": {
     "prettier": "^3.8.3",
