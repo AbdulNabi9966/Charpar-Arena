@@ -101,13 +101,13 @@ export const useOnlineStore = create<OnlineState>((set, get) => ({
     //   reconnectionDelay: 1000,
     // });
 
-    const socket = io('https://charpar-arena.onrender.com', {
+    const socket = io(import.meta.env.VITE_API_URL, {
   path: '/api/socket.io',
   transports: ['websocket', 'polling'],
   reconnection: true,
   reconnectionAttempts: 15,
   reconnectionDelay: 1000,
-    });
+});
 
     socket.on('connect', () => {
       socket.emit('register', { userId, username });
