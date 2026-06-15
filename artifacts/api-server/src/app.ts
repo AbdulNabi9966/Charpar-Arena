@@ -26,13 +26,12 @@ app.use(
   }),
 );
 
-// CORS configuration - MUST be before routes
-const allowedOrigins = [
+// Get allowed origins from environment variable
+const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(",") || [
   "https://charpar-frontend.vercel.app",
-  "https://charpar-frontend-gj5wvbdfk-abdulnabi9966s-projects.vercel.app",
-  "http://localhost:3000",
-  "http://localhost:5173",
 ];
+
+console.log("CORS allowed origins:", allowedOrigins);
 
 app.use(
   cors({
@@ -43,18 +42,17 @@ app.use(
       if (allowedOrigins.indexOf(origin) !== -1) {
         callback(null, true);
       } else {
-        console.warn(`Blocked origin: ${origin}`);
-        callback(null, false); // Don't throw error, just deny
+        console.warn(`CORS blocked origin: ${origin}`);
+        callback(null, false);
       }
     },
     credentials: true,
     methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
     allowedHeaders: ["Content-Type", "Authorization", "Cookie"],
-    exposedHeaders: ["Set-Cookie"],
   })
 );
 
-// Handle preflight requests explicitly
+// Handle preflight requests
 app.options("*", cors());
 
 app.use(express.json());
