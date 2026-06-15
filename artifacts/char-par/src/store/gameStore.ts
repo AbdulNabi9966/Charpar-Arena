@@ -5,7 +5,7 @@ import {
   checkWin, getValidMoves, createInitialBoard,
 } from '../lib/gameLogic';
 
-type GameMode = 'local' | 'ai';
+type GameMode = 'local' | 'ai' | 'online';
 
 interface GameState {
   board: Board;
@@ -19,17 +19,24 @@ interface GameState {
   gameMode: GameMode;
   aiDifficulty: 'easy' | 'medium' | 'hard' | 'expert';
   boardSize: BoardSize;
+  currentGameId: string | null;
+  isOnlineGame: boolean;
+  isWaitingForRematch: boolean;
 
   placePiece: (pos: number) => void;
   selectPiece: (pos: number) => void;
   movePiece: (to: number) => void;
-  /** Atomic AI move — select + move in one state update */
   moveAIPiece: (from: number, to: number) => void;
   resetGame: (
     mode?: GameMode,
     difficulty?: 'easy' | 'medium' | 'hard' | 'expert',
     boardSize?: BoardSize,
   ) => void;
+  setOnlineGame: (gameId: string, board: Board, currentPlayer: Player, playerNumber: Player) => void;
+  updateOnlineMove: (from: number | null, to: number, newState: any) => void;
+  endOnlineGame: () => void;
+  requestRematch: () => void;
+  clearRematch: () => void;
 }
 
 export const useGameStore = create<GameState>()(
@@ -46,6 +53,9 @@ export const useGameStore = create<GameState>()(
       gameMode: 'local',
       aiDifficulty: 'medium',
       boardSize: 3,
+      currentGameId: null,
+      isOnlineGame: false,
+      isWaitingForRematch: false,
 
       placePiece: (pos) => {
         const s = get();
@@ -142,7 +152,67 @@ export const useGameStore = create<GameState>()(
           gameMode: mode ?? cur.gameMode,
           aiDifficulty: difficulty ?? cur.aiDifficulty,
           boardSize: newSize,
+          currentGameId: null,
+          isOnlineGame: false,
+          isWaitingForRematch: false,
         });
+      },
+
+      setOnlineGame: (gameId, board, currentPlayer, playerNumber) => {
+        // Calculate pieces placed from the board
+        const piecesPlaced = {
+          1: board.filter(cell => cell === 1).length,
+          2: board.filter(cell => cell === 2).length,
+        };
+        
+        // Determine phase based on board state
+        const totalPlaced = piecesPlaced[1] + piecesPlaced[2];
+        const maxPieces = get().boardSize;
+        const phase: GamePhase = totalPlaced >= 2 * maxPieces ? 'movement' : 'placement';
+        
+        set({
+          currentGameId: gameId,
+          board: board,
+          phase: phase,
+          currentPlayer: currentPlayer,
+          piecesPlaced: piecesPlaced,
+          winner: null,
+          winLine: null,
+          selectedPiece: null,
+          moveHistory: [],
+          isOnlineGame: true,
+          isWaitingForRematch: false,
+        });
+      },
+
+      updateOnlineMove: (from, to, newState) => {
+        const s = get();
+        if (!s.isOnlineGame) return;
+        
+        set({
+          board: newState.board,
+          phase: newState.phase,
+          currentPlayer: newState.currentPlayer,
+          winner: newState.winner,
+          winLine: newState.winLine,
+          selectedPiece: null,
+          moveHistory: [...s.moveHistory, { player: s.currentPlayer, from, to }],
+        });
+      },
+
+      endOnlineGame: () => {
+        set({
+          isOnlineGame: false,
+          currentGameId: null,
+        });
+      },
+
+      requestRematch: () => {
+        set({ isWaitingForRematch: true });
+      },
+
+      clearRematch: () => {
+        set({ isWaitingForRematch: false });
       },
     }),
     {
