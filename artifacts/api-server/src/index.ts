@@ -20,21 +20,20 @@ if (Number.isNaN(port) || port <= 0) {
 
 const httpServer = createServer(app);
 
-// const io = new SocketIOServer(httpServer, {
-//   path: "/api/socket.io",
-//   cors: {
-//     origin: "*",
-//     methods: ["GET", "POST"],
-//   },
-// });
-
+// CORS for Socket.IO - must match frontend
 const io = new SocketIOServer(httpServer, {
   path: "/api/socket.io",
   cors: {
-    origin: ["https://charpar-frontend.vercel.app"],
+    origin: [
+      "https://charpar-frontend.vercel.app",
+      "https://charpar-frontend-gj5wvbdfk-abdulnabi9966s-projects.vercel.app",
+      "http://localhost:3000",
+      "http://localhost:5173",
+    ],
     methods: ["GET", "POST"],
     credentials: true,
   },
+  transports: ["websocket", "polling"], // Add this for better compatibility
 });
 
 setupSocketIO(io);
