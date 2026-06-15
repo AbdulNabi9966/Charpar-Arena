@@ -32,7 +32,7 @@ export default function Game() {
   const { data: me } = useGetMe({ query: { enabled: !!token, queryKey: ['auth', 'me'] } });
   const {
     status, connect, disconnect, makeMove, playerNum,
-    gameState, opponent, leaveQueue, onlineSelected, setOnlineSelected,
+    gameState, opponent, leaveQueue, onlineSelected, setOnlineSelected, winReason,
   } = useOnlineStore();
 
   const [rulesOpen, setRulesOpen] = useState(false);
@@ -42,10 +42,10 @@ export default function Game() {
 
   // ── Init ─────────────────────────────────────────────────────────────────
   useEffect(() => {
-    if (initialized.current) return;
-    initialized.current = true;
-
+    // Local / AI: initialize once; userId not needed
     if (mode === 'local' || mode === 'ai') {
+      if (initialized.current) return;
+      initialized.current = true;
       const shouldRestore =
         storedBoardSize === boardSize &&
         ((mode === 'local' && gameMode === 'local') ||
@@ -56,19 +56,21 @@ export default function Game() {
       return;
     }
 
+    // Online: wait for userId (guest login is async); only initialize once
     if (mode === 'online') {
+      if (initialized.current) return;
+      if (!userId) return; // userId not ready yet — effect will re-run when it arrives
+
+      initialized.current = true;
+
       const { status: cur, gameState: curGs } = useOnlineStore.getState();
       if (cur === 'in_game' && curGs) return; // already in an active game
 
-      const curUserId = userId;
-      if (!curUserId) return;
-
       const username = me?.username ?? 'Player';
-      connect(curUserId, username, token ?? '');
+      connect(userId, username, token ?? '');
 
-      // After the socket connects, wait a short moment for the server's
-      // 'register' handler to send 'reconnected' (if there's an active game).
-      // If status is still not 'in_game' after that window, join the queue.
+      // After socket connects, allow 350 ms for 'reconnected' to arrive before
+      // joining the queue so a page-refresh mid-game reconnects cleanly.
       let joinScheduled = false;
       const scheduleJoin = (): boolean => {
         const { socket } = useOnlineStore.getState();
@@ -77,10 +79,10 @@ export default function Game() {
         setTimeout(() => {
           const { status: s } = useOnlineStore.getState();
           if (s !== 'in_game') {
-            socket.emit('join_queue', { mode: qmode, userId: curUserId, username, boardSize });
+            socket.emit('join_queue', { mode: qmode, userId, username, boardSize });
             useOnlineStore.setState({ status: 'searching' });
           }
-        }, 350); // allow 350 ms for 'reconnected' to arrive
+        }, 350);
         return true;
       };
 
@@ -97,7 +99,7 @@ export default function Game() {
       }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [userId]); // re-run when userId arrives so online mode connects immediately
 
   // ── Save online session ──────────────────────────────────────────────────
   useEffect(() => {
@@ -269,6 +271,21 @@ export default function Game() {
               <span className={!isMyTurn ? 'text-muted-foreground' : ''}>{turnLabel}</span>
             )}
           </h2>
+
+          {/* Resign reason badge */}
+          {effectiveWinner && mode === 'online' && winReason === 'resign' && (
+            <div className={[
+              'inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium mt-1',
+              effectiveWinner === playerNum
+                ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30'
+                : 'bg-muted text-muted-foreground border border-border',
+            ].join(' ')}>
+              <span>🏳️</span>
+              {effectiveWinner === playerNum
+                ? `${opponent?.username ?? 'Opponent'} resigned`
+                : 'You resigned'}
+            </div>
+          )}
 
           {!effectiveWinner && currentPhase === 'movement' && isMyTurn && (
             <p className="text-xs text-muted-foreground">

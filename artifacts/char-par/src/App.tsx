@@ -17,7 +17,10 @@ function Router() {
     <Switch>
       <Route path="/" component={Home} />
       <Route path="/play" component={Play} />
-      <Route path="/game" component={Game} />
+      <Route path="/game">{() => {
+          const mode = new URLSearchParams(window.location.search).get('mode') || 'local';
+          return <Game key={mode} />;
+        }}</Route>
       <Route path="/leaderboard" component={Leaderboard} />
       <Route path="/profile/:userId" component={Profile} />
       <Route component={NotFound} />

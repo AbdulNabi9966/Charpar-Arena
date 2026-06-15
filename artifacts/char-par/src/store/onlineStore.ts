@@ -58,6 +58,7 @@ type OnlineState = {
   opponent: { id: string; username: string } | null;
   gameState: OnlineGameState | null;
   error: string | null;
+  winReason: string | null;
   onlineCounts: OnlineCounts | null;
   // local UI selection for online board
   onlineSelected: number | null;
@@ -79,6 +80,7 @@ export const useOnlineStore = create<OnlineState>((set, get) => ({
   opponent: null,
   gameState: null,
   error: null,
+  winReason: null,
   onlineCounts: null,
   onlineSelected: null,
 
@@ -195,6 +197,7 @@ export const useOnlineStore = create<OnlineState>((set, get) => ({
       if (gameState) {
         set({
           gameState: { ...gameState, winner: data.winnerPlayerNumber },
+          winReason: data.reason ?? null,
         });
       }
       clearOnlineSession();
@@ -244,7 +247,7 @@ export const useOnlineStore = create<OnlineState>((set, get) => ({
     if (!socket?.connected || !gameId || !playerNum) return;
     socket.emit('resign', { gameId, playerNumber: playerNum });
     clearOnlineSession();
-    set({ status: 'disconnected', gameId: null });
+    set({ status: 'disconnected', gameId: null, winReason: null });
   },
 
   disconnect: () => {
@@ -253,7 +256,8 @@ export const useOnlineStore = create<OnlineState>((set, get) => ({
     clearOnlineSession();
     set({
       socket: null, status: 'disconnected', gameId: null,
-      opponent: null, playerNum: null, gameState: null, onlineSelected: null,
+      opponent: null, playerNum: null, gameState: null,
+      onlineSelected: null, winReason: null,
     });
   },
 
