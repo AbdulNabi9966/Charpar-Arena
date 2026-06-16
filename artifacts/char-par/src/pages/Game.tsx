@@ -59,7 +59,7 @@ export default function Game() {
     isWaitingForRematch,
     socket,
     joinQueue,
-    gameId: onlineGameId, // Rename to avoid conflict
+    gameId: onlineGameId,
   } = useOnlineStore();
 
   const [rematchOffer, setRematchOffer] = useState<{ from: string } | null>(null);
@@ -181,26 +181,24 @@ export default function Game() {
 
   // ── Join queue with retry ────────────────────────────────────────────────
   const attemptJoinQueue = (userId: string, username: string) => {
-    if (joinAttempted) {
-      console.log('⏭️ Join already attempted, skipping');
+    // CRITICAL: Check if already in queue or game
+    const { socket: s, status: st, gameId: currentGameId } = useOnlineStore.getState();
+    
+    if (joinAttempted || st === 'in_game' || currentGameId) {
+      console.log('⏭️ Already in game or queue, skipping join');
       return;
     }
 
-    const { socket: s, status: st, gameId: currentGameId } = useOnlineStore.getState();
-    
     if (!s?.connected) {
       console.log('⏳ Socket not connected, waiting...');
       if (joinTimeoutRef.current) {
         clearTimeout(joinTimeoutRef.current);
       }
       joinTimeoutRef.current = setTimeout(() => {
-        attemptJoinQueue(userId, username);
+        if (!joinAttempted) {
+          attemptJoinQueue(userId, username);
+        }
       }, 1000);
-      return;
-    }
-
-    if (st === 'in_game' || currentGameId) {
-      console.log('⚠️ Already in game, skipping join');
       return;
     }
 
@@ -305,7 +303,9 @@ export default function Game() {
 
       // Wait for socket connection then attempt reconnection or join
       setTimeout(() => {
-        attemptReconnection(userId, username);
+        if (!joinAttempted && status !== 'in_game' && !onlineGameId) {
+          attemptReconnection(userId, username);
+        }
       }, 1500);
 
       // Fallback: if nothing happens after 5 seconds, force join
@@ -313,7 +313,6 @@ export default function Game() {
         const { status: st, gameId: currentGameId } = useOnlineStore.getState();
         if (st !== 'in_game' && !currentGameId && !joinAttempted) {
           console.log('⏰ Fallback: forcing join queue');
-          setJoinAttempted(false);
           attemptJoinQueue(userId, username);
         }
       }, 5000);
@@ -336,18 +335,19 @@ export default function Game() {
   useEffect(() => {
     if (mode !== 'online') return;
     if (!userId) return;
-    if (joinAttempted) return;
-    if (status === 'in_game' || onlineGameId) return;
+    if (status === 'in_game' || onlineGameId) {
+      console.log('⏭️ Already in game, not joining');
+      return;
+    }
 
     const username = me?.username ?? 'Player';
     
-    // If socket is connected and not in game, try to join
-    if (socket?.connected && status === 'disconnected') {
+    // Only attempt to join if socket is connected and we haven't already joined
+    if (socket?.connected && status === 'disconnected' && !joinAttempted) {
       console.log('🔌 Socket connected, attempting to join queue');
-      setJoinAttempted(false);
       attemptJoinQueue(userId, username);
     }
-  }, [socket?.connected, status, userId, mode, onlineGameId]);
+  }, [socket?.connected, status, userId, mode, onlineGameId, joinAttempted]);
 
   // ── Track game ID changes ───────────────────────────────────────────────
   useEffect(() => {
