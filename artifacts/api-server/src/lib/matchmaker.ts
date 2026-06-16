@@ -33,7 +33,7 @@ interface ActiveGame {
   status?: "active" | "completed";
 }
 
-// Separate queue per (mode, boardSize) — players can only match same board size
+// Separate queue per (mode, boardSize)
 const queues: Record<string, QueueEntry[]> = {
   "casual-3": [], "casual-4": [], "casual-5": [],
   "ranked-3": [], "ranked-4": [], "ranked-5": [],
@@ -44,7 +44,7 @@ const socketToGame = new Map<string, string>();
 const socketToUser = new Map<string, { userId: string; username: string }>();
 
 // ── Multi-device support ───────────────────────────────────────────────────
-const userSessions = new Map<string, { socketId: string; userId: string; username: string }[]>();
+const userSessions = new Map<string, Set<string>>(); // userId -> Set of socketIds
 let joinInProgress = false;
 
 function queueKey(mode: "casual" | "ranked", boardSize: BoardSize): string {
@@ -72,6 +72,7 @@ function broadcastOnlineCounts(io: Server): void {
   io.emit("online_counts", { total, playing, searching });
 }
 
+// ── Check if user is in an active game ────────────────────────────────────
 function isUserInActiveGame(userId: string): { gameId: string; game: ActiveGame; playerNumber: number } | null {
   for (const [gameId, game] of activeGames.entries()) {
     if (game.status === "completed") continue;
@@ -81,6 +82,29 @@ function isUserInActiveGame(userId: string): { gameId: string; game: ActiveGame;
     }
   }
   return null;
+}
+
+// ── Get all active sockets for a user ──────────────────────────────────────
+function getUserSockets(userId: string, io: Server): Socket[] {
+  const sockets: Socket[] = [];
+  const sessionIds = userSessions.get(userId);
+  if (sessionIds) {
+    for (const socketId of sessionIds) {
+      const socket = io.sockets.sockets.get(socketId);
+      if (socket) {
+        sockets.push(socket);
+      }
+    }
+  }
+  return sockets;
+}
+
+// ── Emit to all user sessions ──────────────────────────────────────────────
+function emitToUser(userId: string, io: Server, event: string, data: any): void {
+  const sockets = getUserSockets(userId, io);
+  for (const socket of sockets) {
+    socket.emit(event, data);
+  }
 }
 
 async function createGameRecord(game: ActiveGame): Promise<void> {
@@ -138,10 +162,11 @@ async function finalizeGame(
       eloDelta: loserEloDelta, duration },
   ]);
 
-  io.to(game.player1SocketId).emit("game_completed", { gameId, winnerId, winnerUsername });
-  io.to(game.player2SocketId).emit("game_completed", { gameId, winnerId, winnerUsername });
+  // ── Notify all sessions of both players ──────────────────────────────────
+  emitToUser(game.player1Id, io, "game_completed", { gameId, winnerId, winnerUsername });
+  emitToUser(game.player2Id, io, "game_completed", { gameId, winnerId, winnerUsername });
 
-  // Clean up game references
+  // ── Clean up ──────────────────────────────────────────────────────────────
   activeGames.delete(gameId);
   socketToGame.delete(game.player1SocketId);
   socketToGame.delete(game.player2SocketId);
@@ -158,14 +183,25 @@ function tryMatch(queue: QueueEntry[], mode: "casual" | "ranked", boardSize: Boa
       continue;
     }
 
+    // Check if either player is already in a game
+    if (isUserInActiveGame(p1.userId) || isUserInActiveGame(p2.userId)) {
+      // Put them back in queue
+      queue.unshift(p2);
+      queue.unshift(p1);
+      continue;
+    }
+
     const gameId = crypto.randomUUID();
     const state  = createInitialState(boardSize);
 
     const game: ActiveGame = {
       gameId,
-      player1SocketId: p1.socketId, player2SocketId: p2.socketId,
-      player1Id: p1.userId,         player2Id: p2.userId,
-      player1Username: p1.username, player2Username: p2.username,
+      player1SocketId: p1.socketId,
+      player2SocketId: p2.socketId,
+      player1Id: p1.userId,
+      player2Id: p2.userId,
+      player1Username: p1.username,
+      player2Username: p2.username,
       mode, boardSize, state, startedAt: Date.now(),
       status: "active",
     };
@@ -176,25 +212,22 @@ function tryMatch(queue: QueueEntry[], mode: "casual" | "ranked", boardSize: Boa
 
     createGameRecord(game).catch(err => logger.error({ err }, "Failed to create game record"));
 
-    const p1Socket = io.sockets.sockets.get(p1.socketId);
-    const p2Socket = io.sockets.sockets.get(p2.socketId);
+    // ── Notify both players (all their sessions) ──────────────────────────
+    const matchedData1 = {
+      gameId,
+      playerNumber: 1,
+      opponent: { id: p2.userId, username: p2.username },
+      state
+    };
+    const matchedData2 = {
+      gameId,
+      playerNumber: 2,
+      opponent: { id: p1.userId, username: p1.username },
+      state
+    };
 
-    if (p1Socket) {
-      p1Socket.emit("matched", { 
-        gameId, 
-        playerNumber: 1,
-        opponent: { id: p2.userId, username: p2.username }, 
-        state 
-      });
-    }
-    if (p2Socket) {
-      p2Socket.emit("matched", { 
-        gameId, 
-        playerNumber: 2,
-        opponent: { id: p1.userId, username: p1.username }, 
-        state 
-      });
-    }
+    emitToUser(p1.userId, io, "matched", matchedData1);
+    emitToUser(p2.userId, io, "matched", matchedData2);
 
     logger.info({ gameId, p1: p1.userId, p2: p2.userId, mode, boardSize }, "Game matched");
   }
@@ -221,9 +254,11 @@ export function setupSocketIO(io: Server): void {
 
       // ── Store this socket for the user ──────────────────────────────────
       if (!userSessions.has(data.userId)) {
-        userSessions.set(data.userId, []);
+        userSessions.set(data.userId, new Set());
       }
-      
+      userSessions.get(data.userId)!.add(socket.id);
+      socketToUser.set(socket.id, { userId: data.userId, username: data.username });
+
       // ── Check if user is in an active game ──────────────────────────────
       const activeGame = isUserInActiveGame(data.userId);
       if (activeGame) {
@@ -248,58 +283,15 @@ export function setupSocketIO(io: Server): void {
           state: game.state,
         });
 
-        // Notify opponent
-        const opponentSocketId = playerNumber === 1 ? game.player2SocketId : game.player1SocketId;
-        const opponentSocket = io.sockets.sockets.get(opponentSocketId);
-        if (opponentSocket) {
-          opponentSocket.emit("opponent_reconnected");
-        }
-
-        // Store session
-        const sessions = userSessions.get(data.userId) || [];
-        userSessions.set(data.userId, [
-          ...sessions.filter(s => s.socketId !== socket.id),
-          { socketId: socket.id, userId: data.userId, username: data.username }
-        ]);
-        socketToUser.set(socket.id, { userId: data.userId, username: data.username });
+        // ── Notify opponent (all their sessions) ──────────────────────────
+        emitToUser(opponentId, io, "opponent_reconnected", {});
 
         logger.info({ socketId: socket.id, gameId, playerNumber }, "Player reconnected");
         broadcastOnlineCounts(io);
         return;
       }
 
-      // ── Not in game, check for other active sessions ────────────────────
-      const existingSessions = userSessions.get(data.userId) || [];
-      const activeSessions = existingSessions.filter(s => {
-        const sock = io.sockets.sockets.get(s.socketId);
-        return sock?.connected;
-      });
-
-      if (activeSessions.length > 0) {
-        // Notify other devices that a new device connected
-        for (const session of activeSessions) {
-          if (session.socketId !== socket.id) {
-            const sock = io.sockets.sockets.get(session.socketId);
-            if (sock) {
-              sock.emit("other_device_connected", {
-                message: "Another device connected with your account",
-                deviceId: socket.id
-              });
-            }
-          }
-        }
-        logger.info({ userId: data.userId, socketId: socket.id, existingSessions: activeSessions.length }, "Multiple devices connected");
-      }
-
-      // ── Store this session ──────────────────────────────────────────────
-      const sessions = userSessions.get(data.userId) || [];
-      userSessions.set(data.userId, [
-        ...sessions.filter(s => s.socketId !== socket.id),
-        { socketId: socket.id, userId: data.userId, username: data.username }
-      ]);
-      socketToUser.set(socket.id, { userId: data.userId, username: data.username });
-
-      // ── Send ready event ────────────────────────────────────────────────
+      // ── Not in game, ready to join queue ────────────────────────────────
       socket.emit("ready", { status: "ready" });
       broadcastOnlineCounts(io);
     });
@@ -405,16 +397,9 @@ export function setupSocketIO(io: Server): void {
         state: game.state 
       };
 
-      // ── Send to all sockets for both players (multi-device support) ──────
-      const player1Sessions = userSessions.get(game.player1Id) || [];
-      const player2Sessions = userSessions.get(game.player2Id) || [];
-
-      for (const session of player1Sessions) {
-        io.sockets.sockets.get(session.socketId)?.emit("move_made", payload);
-      }
-      for (const session of player2Sessions) {
-        io.sockets.sockets.get(session.socketId)?.emit("move_made", payload);
-      }
+      // ── Send to all sessions of both players ─────────────────────────────
+      emitToUser(game.player1Id, io, "move_made", payload);
+      emitToUser(game.player2Id, io, "move_made", payload);
 
       if (game.state.winner) {
         const winnerId = game.state.winner === 1 ? game.player1Id : game.player2Id;
@@ -427,13 +412,8 @@ export function setupSocketIO(io: Server): void {
           reason: "win" 
         };
         
-        // ── Send game over to all sessions ──────────────────────────────────
-        for (const session of player1Sessions) {
-          io.sockets.sockets.get(session.socketId)?.emit("game_over", gameOverPayload);
-        }
-        for (const session of player2Sessions) {
-          io.sockets.sockets.get(session.socketId)?.emit("game_over", gameOverPayload);
-        }
+        emitToUser(game.player1Id, io, "game_over", gameOverPayload);
+        emitToUser(game.player2Id, io, "game_over", gameOverPayload);
         
         finalizeGame(data.gameId, winnerId, loserId, io)
           .catch(err => logger.error({ err }, "Failed to finalize game"));
@@ -459,16 +439,8 @@ export function setupSocketIO(io: Server): void {
         reason: "resign" 
       };
 
-      // ── Send to all sessions ──────────────────────────────────────────────
-      const player1Sessions = userSessions.get(game.player1Id) || [];
-      const player2Sessions = userSessions.get(game.player2Id) || [];
-
-      for (const session of player1Sessions) {
-        io.sockets.sockets.get(session.socketId)?.emit("game_over", payload);
-      }
-      for (const session of player2Sessions) {
-        io.sockets.sockets.get(session.socketId)?.emit("game_over", payload);
-      }
+      emitToUser(game.player1Id, io, "game_over", payload);
+      emitToUser(game.player2Id, io, "game_over", payload);
 
       finalizeGame(data.gameId, winnerId, loserId, io)
         .catch(err => logger.error({ err }, "Failed to finalize resigned game"));
@@ -498,12 +470,9 @@ export function setupSocketIO(io: Server): void {
         game.rematchRequested.push(userId);
       }
       
-      // ── Notify opponent (all sessions) ──────────────────────────────────
+      // ── Notify opponent (all their sessions) ────────────────────────────
       const opponentId = game.player1Id === userId ? game.player2Id : game.player1Id;
-      const opponentSessions = userSessions.get(opponentId) || [];
-      for (const session of opponentSessions) {
-        io.sockets.sockets.get(session.socketId)?.emit("rematch_offered", { by: userId });
-      }
+      emitToUser(opponentId, io, "rematch_offered", { by: userId });
       
       if (game.rematchRequested.length === 2) {
         const player1 = socketToUser.get(game.player1SocketId);
@@ -534,29 +503,23 @@ export function setupSocketIO(io: Server): void {
           
           await createGameRecord(newGame);
           
-          // ── Send to all sessions ──────────────────────────────────────────
-          const p1Sessions = userSessions.get(game.player1Id) || [];
-          const p2Sessions = userSessions.get(game.player2Id) || [];
-
-          for (const session of p1Sessions) {
-            io.sockets.sockets.get(session.socketId)?.emit("matched", {
-              gameId: newGameId,
-              playerNumber: 1,
-              opponent: { id: game.player2Id, username: game.player2Username },
-              state: state,
-              isRematch: true
-            });
-          }
+          const matchedData1 = {
+            gameId: newGameId,
+            playerNumber: 1,
+            opponent: { id: game.player2Id, username: game.player2Username },
+            state: state,
+            isRematch: true
+          };
+          const matchedData2 = {
+            gameId: newGameId,
+            playerNumber: 2,
+            opponent: { id: game.player1Id, username: game.player1Username },
+            state: state,
+            isRematch: true
+          };
           
-          for (const session of p2Sessions) {
-            io.sockets.sockets.get(session.socketId)?.emit("matched", {
-              gameId: newGameId,
-              playerNumber: 2,
-              opponent: { id: game.player1Id, username: game.player1Username },
-              state: state,
-              isRematch: true
-            });
-          }
+          emitToUser(game.player1Id, io, "matched", matchedData1);
+          emitToUser(game.player2Id, io, "matched", matchedData2);
           
           delete game.rematchRequested;
           
@@ -576,12 +539,8 @@ export function setupSocketIO(io: Server): void {
       const userId = socketToUser.get(socket.id)?.userId;
       if (!userId) return;
       
-      // ── Notify opponent (all sessions) ──────────────────────────────────
       const opponentId = game.player1Id === userId ? game.player2Id : game.player1Id;
-      const opponentSessions = userSessions.get(opponentId) || [];
-      for (const session of opponentSessions) {
-        io.sockets.sockets.get(session.socketId)?.emit("rematch_declined");
-      }
+      emitToUser(opponentId, io, "rematch_declined", {});
       
       delete game.rematchRequested;
     });
@@ -595,10 +554,8 @@ export function setupSocketIO(io: Server): void {
       if (user) {
         const sessions = userSessions.get(user.userId);
         if (sessions) {
-          const updatedSessions = sessions.filter(s => s.socketId !== socket.id);
-          if (updatedSessions.length > 0) {
-            userSessions.set(user.userId, updatedSessions);
-          } else {
+          sessions.delete(socket.id);
+          if (sessions.size === 0) {
             userSessions.delete(user.userId);
           }
         }
@@ -608,11 +565,11 @@ export function setupSocketIO(io: Server): void {
       if (gameId) {
         const game = activeGames.get(gameId);
         if (game && game.status !== "completed") {
-          // ── Notify opponent (all sessions) ──────────────────────────────
-          const opponentId = game.player1Id === user?.userId ? game.player2Id : game.player1Id;
-          const opponentSessions = userSessions.get(opponentId) || [];
-          for (const session of opponentSessions) {
-            io.sockets.sockets.get(session.socketId)?.emit("opponent_disconnected");
+          // ── Notify opponent (all their sessions) ──────────────────────────
+          const userData = socketToUser.get(socket.id);
+          if (userData) {
+            const opponentId = game.player1Id === userData.userId ? game.player2Id : game.player1Id;
+            emitToUser(opponentId, io, "opponent_disconnected", {});
           }
         }
       }
