@@ -33,7 +33,7 @@ interface ActiveGame {
   status?: "active" | "completed";
 }
 
-// Separate queue per (mode, boardSize)
+// Separate queue per (mode, boardSize) - players can only match same board size
 const queues: Record<string, QueueEntry[]> = {
   "casual-3": [], "casual-4": [], "casual-5": [],
   "ranked-3": [], "ranked-4": [], "ranked-5": [],
@@ -290,6 +290,14 @@ export function setupSocketIO(io: Server): void {
       username: string;
       boardSize?: BoardSize;
     }) => {
+      // Log the incoming request
+      logger.info({ 
+        socketId: socket.id, 
+        userId: data.userId, 
+        mode: data.mode, 
+        boardSize: data.boardSize 
+      }, "Join queue request received");
+
       if (joinInProgress) {
         socket.emit("queued", { 
           position: 0, 
@@ -308,11 +316,13 @@ export function setupSocketIO(io: Server): void {
       const boardSize: BoardSize = ([3, 4, 5] as const).includes(data.boardSize as BoardSize)
         ? (data.boardSize as BoardSize) : 3;
 
+      // Remove from any existing queue slot first
       removeFromAllQueues({ userId: data.userId });
 
       const key = queueKey(data.mode, boardSize);
       const queue = queues[key];
       
+      // Don't add if user is already in this queue
       if (queue.some(e => e.userId === data.userId)) {
         socket.emit("queued", { position: queue.length, mode: data.mode, boardSize });
         return;
@@ -330,6 +340,7 @@ export function setupSocketIO(io: Server): void {
       joinInProgress = true;
       socket.emit("queued", { position: queue.length, mode: data.mode, boardSize });
       
+      // Try to match
       tryMatch(queue, data.mode, boardSize, io);
       broadcastOnlineCounts(io);
 
@@ -428,6 +439,7 @@ export function setupSocketIO(io: Server): void {
         .catch(err => logger.error({ err }, "Failed to finalize resigned game"));
     });
 
+    // Rematch handlers
     socket.on("request_rematch", async (data: { gameId: string }) => {
       const game = activeGames.get(data.gameId);
       if (!game) {
