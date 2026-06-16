@@ -70,68 +70,86 @@ export default function Game() {
   const initialized = useRef(false);
   const isUnmounting = useRef(false);
 
+  // ── Force reset online state ─────────────────────────────────────────────
+  const forceResetOnlineState = () => {
+    // Clear session storage
+    clearOnlineSession();
+    
+    // Force reset online store state
+    useOnlineStore.setState({
+      status: 'disconnected',
+      gameId: null,
+      playerNum: null,
+      opponent: null,
+      gameState: null,
+      onlineSelected: null,
+      winReason: null,
+      error: null,
+      isWaitingForRematch: false,
+    });
+    
+    // Disconnect socket
+    const { socket: s } = useOnlineStore.getState();
+    if (s?.connected) {
+      s.disconnect();
+    }
+  };
+
   // ── Complete cleanup function ────────────────────────────────────────────
   const fullCleanup = () => {
-    // Prevent multiple cleanups
     if (isUnmounting.current) return;
     isUnmounting.current = true;
 
-    // 1. Clear online session storage
-    clearOnlineSession();
+    // 1. Force reset online state
+    forceResetOnlineState();
 
-    // 2. Disconnect socket and leave queues
-    if (mode === 'online') {
-      // Leave queue if searching
-      if (status === 'searching') {
-        leaveQueue();
-      }
-      // Disconnect socket
-      disconnect();
-    }
-
-    // 3. Reset game store to clean state
+    // 2. Reset game store
     resetGame('local', 'medium', 3);
 
-    // 4. Reset all local states
+    // 3. Reset all local states
     setRematchOffer(null);
     setIsWaitingForRematchResponse(false);
     setShowResignConfirm(false);
     setShowExitConfirm(false);
 
-    // 5. Reset AI pending flag
+    // 4. Reset flags
     aiPending.current = false;
-
-    // 6. Reset initialization flag so game can re-initialize
     initialized.current = false;
 
-    // 7. Allow future cleanups
     setTimeout(() => {
       isUnmounting.current = false;
     }, 100);
   };
 
-  // ── Safe navigation with cleanup ─────────────────────────────────────────
+  // ── Navigate with cleanup ────────────────────────────────────────────────
   const navigateWithCleanup = (path: string) => {
     fullCleanup();
-    // Use setTimeout to ensure state updates are processed
     setTimeout(() => {
       setLocation(path);
     }, 50);
   };
 
+  // ── Handle game end - force reset online state ──────────────────────────
+  useEffect(() => {
+    if (mode === 'online' && gameState?.winner) {
+      // Don't clear immediately - allow rematch
+      // But we need to prepare for the next game
+      console.log('Game ended, preparing for next match...');
+    }
+  }, [mode, gameState?.winner]);
+
   // ── Resign handler ────────────────────────────────────────────────────────
   const handleResign = () => {
     if (mode === 'online') {
-      // Online: send resign to server
       const currentGameId = useOnlineStore.getState().gameId;
       if (currentGameId && socket?.connected) {
         socket.emit('resign', { gameId: currentGameId, playerNumber: playerNum });
       }
-      // Cleanup and navigate
+      // Force reset and navigate
+      forceResetOnlineState();
       fullCleanup();
       setTimeout(() => setLocation('/play'), 100);
     } else {
-      // Local / AI: just reset and go to play page
       fullCleanup();
       setTimeout(() => setLocation('/play'), 100);
     }
@@ -140,7 +158,6 @@ export default function Game() {
 
   // ── Init ─────────────────────────────────────────────────────────────────
   useEffect(() => {
-    // Reset unmount flag on mount
     isUnmounting.current = false;
 
     if (mode === 'local' || mode === 'ai') {
@@ -161,6 +178,9 @@ export default function Game() {
       if (!userId) return;
 
       initialized.current = true;
+
+      // Force reset any stale state before connecting
+      forceResetOnlineState();
 
       const { status: cur, gameState: curGs } = useOnlineStore.getState();
       if (cur === 'in_game' && curGs) return;
@@ -192,7 +212,6 @@ export default function Game() {
     }
 
     return () => {
-      // Cleanup on unmount
       if (mode === 'online') {
         const { status: s } = useOnlineStore.getState();
         if (s === 'searching') leaveQueue();
@@ -532,14 +551,21 @@ export default function Game() {
             )}
 
             <button
-              onClick={() => navigateWithCleanup('/play')}
+              onClick={() => {
+                // Force reset before navigating
+                forceResetOnlineState();
+                navigateWithCleanup('/play');
+              }}
               className="bg-primary text-primary-foreground px-8 py-3 rounded-lg font-medium hover:bg-primary/90 transition-colors"
             >
               {mode === 'online' ? 'Find New Match' : 'Play Again'}
             </button>
 
             <button
-              onClick={() => navigateWithCleanup('/')}
+              onClick={() => {
+                forceResetOnlineState();
+                navigateWithCleanup('/');
+              }}
               className="bg-secondary text-secondary-foreground px-8 py-3 rounded-lg font-medium hover:bg-secondary/80 transition-colors"
             >
               Exit
@@ -611,7 +637,10 @@ export default function Game() {
             </p>
             <div className="flex gap-3">
               <button
-                onClick={() => navigateWithCleanup('/')}
+                onClick={() => {
+                  forceResetOnlineState();
+                  navigateWithCleanup('/');
+                }}
                 className="flex-1 bg-red-500 hover:bg-red-600 text-white font-semibold py-3 rounded-lg transition-colors"
               >
                 Yes, Exit
@@ -642,6 +671,7 @@ export default function Game() {
           declineRematch();
           setRematchOffer(null);
           setIsWaitingForRematchResponse(false);
+          forceResetOnlineState();
           navigateWithCleanup('/play');
         }}
       />
