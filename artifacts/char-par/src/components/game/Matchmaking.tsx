@@ -15,8 +15,9 @@ export function Matchmaking({ boardSize = 3 }: MatchmakingProps) {
 
   const [countdown, setCountdown] = useState(TIMEOUT_SECS);
   const [phase, setPhase] = useState<'searching' | 'no_players' | 'connecting_ai'>('searching');
+  const [joinAttempted, setJoinAttempted] = useState(false);
 
-  // Stable refs
+  // Stable refs so interval closure never goes stale
   const boardSizeRef = useRef(boardSize);
   boardSizeRef.current = boardSize;
   const leaveQueueRef = useRef(leaveQueue);
@@ -28,12 +29,24 @@ export function Matchmaking({ boardSize = 3 }: MatchmakingProps) {
   useEffect(() => {
     console.log('🎯 Matchmaking mounted with boardSize:', boardSize);
     
-    if (userId && username) {
+    if (userId && username && !joinAttempted) {
       console.log('📤 Joining queue with boardSize:', boardSize);
+      setJoinAttempted(true);
       joinQueue('casual', userId, username, boardSize as BoardSize);
     }
+  }, [userId, username]);
 
-    // ── Countdown timer ────────────────────────────────────────────────────
+  // ── Try to join if userId becomes available later ──────────────────────
+  useEffect(() => {
+    if (userId && username && !joinAttempted) {
+      console.log('🔄 User ready, joining queue with boardSize:', boardSize);
+      setJoinAttempted(true);
+      joinQueue('casual', userId, username, boardSize as BoardSize);
+    }
+  }, [userId, username]);
+
+  // ── Single effect: countdown + AI fallback, runs once on mount ──────────
+  useEffect(() => {
     let remaining = TIMEOUT_SECS;
 
     const tick = setInterval(() => {
@@ -43,6 +56,7 @@ export function Matchmaking({ boardSize = 3 }: MatchmakingProps) {
       if (remaining <= 0) {
         clearInterval(tick);
 
+        // Guard: if already matched (phase changed externally), do nothing
         if (phaseRef.current !== 'searching') return;
 
         leaveQueueRef.current();
@@ -58,24 +72,17 @@ export function Matchmaking({ boardSize = 3 }: MatchmakingProps) {
     }, 1000);
 
     return () => clearInterval(tick);
-  }, []); // runs once on mount
+  }, []); // runs exactly once on mount
 
-  // ── Also try to join if userId becomes available later ──────────────────
-  useEffect(() => {
-    if (userId && username) {
-      console.log('🔄 User ready, joining queue with boardSize:', boardSize);
-      joinQueue('casual', userId, username, boardSize as BoardSize);
-    }
-  }, [userId, username]);
-
-  const total = onlineCounts?.total ?? null;
-  const playing = onlineCounts?.playing ?? {};
+  const total    = onlineCounts?.total ?? null;
+  const playing  = onlineCounts?.playing  ?? {};
   const searching = onlineCounts?.searching ?? {};
-  const sizes = [3, 4, 5] as const;
+  const sizes    = [3, 4, 5] as const;
   const isSearching = phase === 'searching';
 
   return (
     <div className="flex flex-col items-center justify-center min-h-[420px] w-full max-w-sm mx-auto px-4">
+
       {/* Pulse ring */}
       <div className="relative flex items-center justify-center w-32 h-32 mb-7">
         {phase === 'searching' && (
