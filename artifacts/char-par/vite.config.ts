@@ -11,16 +11,24 @@ if (Number.isNaN(port) || port <= 0) {
 
 const basePath = process.env.BASE_PATH || "/";
 
-// ── Determine API URL for proxy ──────────────────────────────────────────────
-// For local development, proxy to backend
-// For production, use environment variable
-const isDev = process.env.NODE_ENV !== "production";
-const apiTarget = isDev 
-  ? "http://localhost:8080"  // Local backend
-  : process.env.VITE_API_URL || "https://charpar-arena.onrender.com";
+// ── Backend Configuration ──────────────────────────────────────────────────────
+// Get backend URL from environment or use default
+// Default backend port is 3001 (matching your Render config)
+const backendPort = process.env.BACKEND_PORT || "3001";
+const backendHost = process.env.BACKEND_HOST || "localhost";
 
+// For local development
+const localBackendUrl = `http://${backendHost}:${backendPort}`;
+
+// For production (Render)
+const prodBackendUrl = process.env.VITE_API_URL || "https://charpar-arena.onrender.com";
+
+const isDev = process.env.NODE_ENV !== "production";
+const apiTarget = isDev ? localBackendUrl : prodBackendUrl;
+
+console.log(`🔧 Environment: ${isDev ? 'Development' : 'Production'}`);
 console.log(`🔧 API Target: ${apiTarget}`);
-console.log(`🔧 Environment: ${process.env.NODE_ENV || 'development'}`);
+console.log(`🔧 Backend Port: ${backendPort}`);
 
 export default defineConfig({
   base: basePath,
@@ -51,7 +59,6 @@ export default defineConfig({
     strictPort: true,
     host: "0.0.0.0",
     allowedHosts: true,
-    // ── Only proxy in development ──────────────────────────────────────────────
     proxy: isDev ? {
       '/api': {
         target: apiTarget,
