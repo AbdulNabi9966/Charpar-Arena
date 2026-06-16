@@ -40,48 +40,9 @@ export default function Game() {
   const [rematchOffer, setRematchOffer] = useState<{ from: string } | null>(null);
   const [isWaitingForRematchResponse, setIsWaitingForRematchResponse] = useState(false);
   const [rulesOpen, setRulesOpen] = useState(false);
-  const [showResignConfirm, setShowResignConfirm] = useState(false);
 
   const aiPending   = useRef(false);
   const initialized = useRef(false);
-
-  // ── Cleanup function ──────────────────────────────────────────────────────
-  const cleanupAndNavigate = (path: string) => {
-    // 1. Clear online session
-    clearOnlineSession();
-    
-    // 2. Disconnect socket if online
-    if (mode === 'online') {
-      disconnect();
-    }
-    
-    // 3. Reset game store
-    resetGame('local', difficulty, storedBoardSize);
-    
-    // 4. Reset rematch states
-    setRematchOffer(null);
-    setIsWaitingForRematchResponse(false);
-    setShowResignConfirm(false);
-    
-    // 5. Navigate
-    setLocation(path);
-  };
-
-  // ── Resign handler ────────────────────────────────────────────────────────
-  const handleResign = () => {
-    if (mode === 'online') {
-      // Online: send resign to server
-      useOnlineStore.getState().resign();
-      clearOnlineSession();
-      resetGame('online', difficulty, storedBoardSize);
-      setLocation('/play');
-    } else {
-      // Local / AI: just reset and go to play page
-      resetGame('local', difficulty, storedBoardSize);
-      setLocation('/play');
-    }
-    setShowResignConfirm(false);
-  };
 
   // ── Init ─────────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -152,10 +113,7 @@ export default function Game() {
 
   // ── Clear session on game end ────────────────────────────────────────────
   useEffect(() => {
-    if (mode === 'online' && gameState?.winner) {
-      // Don't clear immediately - allow rematch
-      // clearOnlineSession();
-    }
+    if (mode === 'online' && gameState?.winner) clearOnlineSession();
   }, [mode, gameState?.winner]);
 
   // ── AI turn ──────────────────────────────────────────────────────────────
@@ -299,20 +257,6 @@ export default function Game() {
           </div>
         )}
 
-        {/* AI opponent banner */}
-        {mode === 'ai' && (
-          <div className="mb-5 flex items-center gap-4 text-sm">
-            <span className="font-semibold text-red-400">
-              You (🔴)
-            </span>
-            <span className="text-muted-foreground text-xs uppercase tracking-widest">vs</span>
-            <span className="font-semibold text-blue-400">
-              AI ({difficulty})
-            </span>
-            <span className="text-xs text-muted-foreground">· {storedBoardSize}×{storedBoardSize}</span>
-          </div>
-        )}
-
         {/* Disconnect warning */}
         {mode === 'online' && useOnlineStore.getState().error && (
           <div className="mb-4 px-4 py-2 rounded-lg bg-yellow-500/10 border border-yellow-500/30 text-yellow-400 text-sm">
@@ -429,14 +373,30 @@ export default function Game() {
             )}
             
             <button
-              onClick={() => cleanupAndNavigate('/play')}
+              onClick={() => {
+                if (mode === 'online') {
+                  disconnect();
+                  clearOnlineSession();
+                  resetGame('online', difficulty, storedBoardSize);
+                } else {
+                  resetGame(mode as 'local' | 'ai', difficulty, storedBoardSize);
+                }
+                setLocation('/play');
+              }}
               className="bg-primary text-primary-foreground px-8 py-3 rounded-lg font-medium hover:bg-primary/90 transition-colors"
             >
               {mode === 'online' ? 'Find New Match' : 'Play Again'}
             </button>
             
             <button
-              onClick={() => cleanupAndNavigate('/')}
+              onClick={() => {
+                if (mode === 'online') {
+                  disconnect();
+                  clearOnlineSession();
+                }
+                resetGame('local', difficulty, storedBoardSize);
+                setLocation('/');
+              }}
               className="bg-secondary text-secondary-foreground px-8 py-3 rounded-lg font-medium hover:bg-secondary/80 transition-colors"
             >
               Exit
@@ -444,70 +404,19 @@ export default function Game() {
           </div>
         )}
 
-        {/* Resign & Exit buttons - visible during game for all modes */}
-        {!effectiveWinner && (
-          <div className="mt-8 flex gap-4 relative z-10">
-            {/* Resign button */}
-            {mode !== 'local' && (
-              <button
-                onClick={() => setShowResignConfirm(true)}
-                className="text-xs text-red-400 hover:text-red-300 transition-colors underline underline-offset-2"
-              >
-                Resign
-              </button>
-            )}
-            
-            {/* Exit button for all modes */}
-            <button
-              onClick={() => {
-                if (mode === 'online') {
-                  // Check if we're in a game before confirming
-                  if (status === 'in_game') {
-                    if (confirm('Are you sure you want to leave the game?')) {
-                      cleanupAndNavigate('/');
-                    }
-                  } else {
-                    cleanupAndNavigate('/');
-                  }
-                } else {
-                  if (confirm('Are you sure you want to exit the game?')) {
-                    cleanupAndNavigate('/');
-                  }
-                }
-              }}
-              className="text-xs text-muted-foreground hover:text-foreground transition-colors underline underline-offset-2"
-            >
-              Exit Game
-            </button>
-          </div>
-        )}
-
-        {/* Resign confirmation dialog */}
-        {showResignConfirm && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
-            <div className="bg-card border border-border rounded-2xl shadow-2xl max-w-sm w-full p-6">
-              <h3 className="text-xl font-bold mb-2">Resign Game?</h3>
-              <p className="text-sm text-muted-foreground mb-6">
-                {mode === 'online' 
-                  ? 'Are you sure you want to resign? This will count as a loss.'
-                  : 'Are you sure you want to resign? The AI will win this game.'}
-              </p>
-              <div className="flex gap-3">
-                <button
-                  onClick={handleResign}
-                  className="flex-1 bg-red-500 hover:bg-red-600 text-white font-semibold py-3 rounded-lg transition-colors"
-                >
-                  Yes, Resign
-                </button>
-                <button
-                  onClick={() => setShowResignConfirm(false)}
-                  className="flex-1 bg-secondary hover:bg-secondary/80 text-secondary-foreground font-semibold py-3 rounded-lg transition-colors"
-                >
-                  Cancel
-                </button>
-              </div>
-            </div>
-          </div>
+        {/* Resign (online) */}
+        {mode === 'online' && !effectiveWinner && status === 'in_game' && (
+          <button
+            onClick={() => {
+              useOnlineStore.getState().resign();
+              clearOnlineSession();
+              resetGame('online', difficulty, storedBoardSize);
+              setLocation('/play');
+            }}
+            className="mt-8 text-xs text-muted-foreground hover:text-foreground transition-colors underline underline-offset-2"
+          >
+            Resign
+          </button>
         )}
       </div>
 
