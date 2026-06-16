@@ -251,6 +251,18 @@ export const useOnlineStore = create<OnlineState>((set, get) => ({
       set({ error: data.error, isWaitingForRematch: false });
     });
 
+    // Add this to your onlineStore.ts - add a rejoinGame method
+
+rejoinGame: (gameId: string, userId: string, username: string) => {
+  const { socket } = get();
+  if (!socket?.connected) {
+    set({ error: 'Not connected to server' });
+    return;
+  }
+  console.log('🔄 Rejoining game:', gameId);
+  socket.emit('rejoin_game', { gameId, userId, username });
+},
+
     socket.on('disconnect', () => {
       // Keep in_game status — socket.io will auto-reconnect
       const { status } = get();
