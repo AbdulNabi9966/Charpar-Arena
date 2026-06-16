@@ -14,6 +14,7 @@ export type OnlineGameState = {
   boardSize: BoardSize;
 };
 
+// Saved to sessionStorage so a page refresh can reconnect
 type PersistedSession = {
   gameId: string;
   playerNum: 1 | 2;
@@ -62,6 +63,7 @@ type OnlineState = {
   error: string | null;
   winReason: string | null;
   onlineCounts: OnlineCounts | null;
+  // local UI selection for online board
   onlineSelected: number | null;
   isWaitingForRematch: boolean;
 
@@ -75,7 +77,6 @@ type OnlineState = {
   requestRematch: () => void;
   declineRematch: () => void;
   clearRematch: () => void;
-  rejoinGame: (gameId: string, userId: string, username: string) => void;
 };
 
 export const useOnlineStore = create<OnlineState>((set, get) => ({
@@ -100,7 +101,7 @@ export const useOnlineStore = create<OnlineState>((set, get) => ({
 
     set({ status: 'connecting', error: null });
 
-    const socket = io(import.meta.env.VITE_API_URL || 'https://charpar-arena.onrender.com', {
+    const socket = io('https://charpar-arena.onrender.com', {
       path: '/api/socket.io',
       transports: ['websocket', 'polling'],
       reconnection: true,
@@ -112,12 +113,14 @@ export const useOnlineStore = create<OnlineState>((set, get) => ({
       console.log('🔌 Socket connected');
       socket.emit('register', { userId, username });
 
+      // If we have a saved session, try to rejoin that game first
       const saved = loadOnlineSession();
       if (saved && saved.userId === userId) {
         console.log('🔄 Found saved session, rejoining game:', saved.gameId);
         socket.emit('rejoin_game', { gameId: saved.gameId, userId, username });
       }
 
+      // Only reset to disconnected if we weren't already in_game
       const { status } = get();
       if (status !== 'in_game') {
         set({ status: 'disconnected' });
@@ -242,12 +245,14 @@ export const useOnlineStore = create<OnlineState>((set, get) => ({
           isWaitingForRematch: false,
         });
       }
+      // Don't clear session immediately - allow rematch
     });
 
     socket.on('game_completed', (data: { gameId: string; winnerId: string; winnerUsername: string }) => {
       console.log('✅ Game completed:', data);
     });
 
+    // Rematch event handlers
     socket.on('rematch_offered', (data: { by: string }) => {
       console.log('💬 Rematch offered by:', data.by);
       set({ error: null });
@@ -308,9 +313,7 @@ export const useOnlineStore = create<OnlineState>((set, get) => ({
       return;
     }
     
-    console.log('🎯 Joining queue with boardSize:', boardSize);
-    console.log('🎯 Full join data:', { mode, userId, username, boardSize });
-    
+    console.log('🎯 Joining queue:', { mode, userId, username, boardSize });
     joinInProgress = true;
     set({ status: 'searching', error: null });
     socket.emit('join_queue', { mode, userId, username, boardSize });
@@ -338,6 +341,7 @@ export const useOnlineStore = create<OnlineState>((set, get) => ({
 
     console.log('♟️ Making move:', { from, to, gameId, playerNum });
 
+    // Optimistic update: apply the move locally for instant visual feedback.
     const newBoard = [...gameState.board] as (1 | 2 | null)[];
     newBoard[to] = playerNum;
     if (from !== null) newBoard[from] = null;
@@ -352,13 +356,7 @@ export const useOnlineStore = create<OnlineState>((set, get) => ({
     const newPhase = gameState.phase === 'placement' && allPlaced ? 'movement' : gameState.phase;
 
     set({
-      gameState: { 
-        ...gameState, 
-        board: newBoard, 
-        piecesPlaced: newPiecesPlaced, 
-        currentPlayer: nextPlayer, 
-        phase: newPhase 
-      },
+      gameState: { ...gameState, board: newBoard, piecesPlaced: newPiecesPlaced, currentPlayer: nextPlayer, phase: newPhase },
       onlineSelected: null,
     });
 
@@ -430,15 +428,5 @@ export const useOnlineStore = create<OnlineState>((set, get) => ({
 
   clearRematch: () => {
     set({ isWaitingForRematch: false });
-  },
-
-  rejoinGame: (gameId: string, userId: string, username: string) => {
-    const { socket } = get();
-    if (!socket?.connected) {
-      set({ error: 'Not connected to server' });
-      return;
-    }
-    console.log('🔄 Rejoining game:', gameId);
-    socket.emit('rejoin_game', { gameId, userId, username });
   },
 }));
