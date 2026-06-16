@@ -5,6 +5,7 @@ import { Board } from '../components/game/Board';
 import { Matchmaking } from '../components/game/Matchmaking';
 import { Confetti } from '../components/game/Confetti';
 import { RulesModal } from '../components/game/RulesModal';
+import { RematchModal } from '../components/game/RematchModal';
 import { useGameStore } from '../store/gameStore';
 import { useOnlineStore, saveOnlineSession, loadOnlineSession, clearOnlineSession } from '../store/onlineStore';
 import { useAuthStore } from '../store/authStore';
@@ -36,6 +37,8 @@ export default function Game() {
     requestRematch, declineRematch, isWaitingForRematch,
   } = useOnlineStore();
 
+  const [rematchOffer, setRematchOffer] = useState<{ from: string } | null>(null);
+  const [isWaitingForRematchResponse, setIsWaitingForRematchResponse] = useState(false);
   const [rulesOpen, setRulesOpen] = useState(false);
 
   const aiPending   = useRef(false);
@@ -43,7 +46,6 @@ export default function Game() {
 
   // ── Init ─────────────────────────────────────────────────────────────────
   useEffect(() => {
-    // Local / AI: initialize once; userId not needed
     if (mode === 'local' || mode === 'ai') {
       if (initialized.current) return;
       initialized.current = true;
@@ -57,21 +59,18 @@ export default function Game() {
       return;
     }
 
-    // Online: wait for userId (guest login is async); only initialize once
     if (mode === 'online') {
       if (initialized.current) return;
-      if (!userId) return; // userId not ready yet — effect will re-run when it arrives
+      if (!userId) return;
 
       initialized.current = true;
 
       const { status: cur, gameState: curGs } = useOnlineStore.getState();
-      if (cur === 'in_game' && curGs) return; // already in an active game
+      if (cur === 'in_game' && curGs) return;
 
       const username = me?.username ?? 'Player';
       connect(userId, username, token ?? '');
 
-      // After socket connects, allow 350 ms for 'reconnected' to arrive before
-      // joining the queue so a page-refresh mid-game reconnects cleanly.
       let joinScheduled = false;
       const scheduleJoin = (): boolean => {
         const { socket } = useOnlineStore.getState();
@@ -99,8 +98,7 @@ export default function Game() {
         if (s === 'searching') leaveQueue();
       }
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [userId]); // re-run when userId arrives so online mode connects immediately
+  }, [userId]);
 
   // ── Save online session ──────────────────────────────────────────────────
   useEffect(() => {
@@ -205,22 +203,29 @@ export default function Game() {
   const activeBoardSize = mode === 'online' ? onlineBoardSize : storedBoardSize;
 
   // ── Rematch event listener ──────────────────────────────────────────────
-useEffect(() => {
-  if (mode !== 'online') return;
+  useEffect(() => {
+    if (mode !== 'online') return;
+    
+    const handleRematchOffer = (event: CustomEvent<{ by: string }>) => {
+      const from = event.detail?.by || 'Opponent';
+      const opponentName = opponent?.username || from;
+      setRematchOffer({ from: opponentName });
+    };
+    
+    const handleRematchStarted = () => {
+      setRematchOffer(null);
+      setIsWaitingForRematchResponse(false);
+    };
+    
+    window.addEventListener('rematch-offered', handleRematchOffer as EventListener);
+    window.addEventListener('rematch-started', handleRematchStarted as EventListener);
+    
+    return () => {
+      window.removeEventListener('rematch-offered', handleRematchOffer as EventListener);
+      window.removeEventListener('rematch-started', handleRematchStarted as EventListener);
+    };
+  }, [mode, opponent?.username]);
   
-  const handleRematchOffer = () => {
-    const accept = window.confirm('Opponent wants a rematch! Accept?');
-    if (accept) {
-      requestRematch();
-    } else {
-      declineRematch();
-    }
-  };
-  
-  window.addEventListener('rematch-offered', handleRematchOffer);
-  return () => window.removeEventListener('rematch-offered', handleRematchOffer);
-}, [mode, requestRematch, declineRematch]);
-
   // ── Matchmaking screen ────────────────────────────────────────────────────
   if (mode === 'online' && status !== 'in_game') {
     return (
@@ -350,41 +355,64 @@ useEffect(() => {
 
         {/* End-game buttons */}
         {effectiveWinner && (
-  <div className="mt-10 flex gap-4 animate-in fade-in slide-in-from-bottom-4 relative z-10 flex-wrap justify-center">
-    {/* Rematch button - only for online mode */}
-    {mode === 'online' && (
-      <button
-        onClick={requestRematch}
-        disabled={isWaitingForRematch}
-        className="bg-emerald-500 text-white px-8 py-3 rounded-lg font-medium hover:bg-emerald-600 transition-colors disabled:opacity-50"
-      >
-        {isWaitingForRematch ? 'Waiting for opponent...' : 'Request Rematch'}
-      </button>
-    )}
-    
-    <button
-      onClick={() => {
-        if (mode === 'online') { disconnect(); setLocation('/play'); }
-        else resetGame(mode as 'local' | 'ai', difficulty, storedBoardSize);
-      }}
-      className="bg-primary text-primary-foreground px-8 py-3 rounded-lg font-medium hover:bg-primary/90 transition-colors"
-    >
-      {mode === 'online' ? 'Find New Match' : 'Play Again'}
-    </button>
-    
-    <button
-      onClick={() => setLocation('/play')}
-      className="bg-secondary text-secondary-foreground px-8 py-3 rounded-lg font-medium hover:bg-secondary/80 transition-colors"
-    >
-      Exit
-    </button>
-  </div>
-)}
+          <div className="mt-10 flex gap-4 animate-in fade-in slide-in-from-bottom-4 relative z-10 flex-wrap justify-center">
+            {/* Rematch button - only for online mode */}
+            {mode === 'online' && (
+              <button
+                onClick={() => {
+                  setIsWaitingForRematchResponse(true);
+                  requestRematch();
+                }}
+                disabled={isWaitingForRematch || isWaitingForRematchResponse}
+                className="bg-emerald-500 text-white px-8 py-3 rounded-lg font-medium hover:bg-emerald-600 transition-colors disabled:opacity-50"
+              >
+                {isWaitingForRematch || isWaitingForRematchResponse 
+                  ? 'Waiting for opponent...' 
+                  : 'Request Rematch'}
+              </button>
+            )}
+            
+            <button
+              onClick={() => {
+                if (mode === 'online') {
+                  disconnect();
+                  clearOnlineSession();
+                  resetGame('online', difficulty, storedBoardSize);
+                } else {
+                  resetGame(mode as 'local' | 'ai', difficulty, storedBoardSize);
+                }
+                setLocation('/play');
+              }}
+              className="bg-primary text-primary-foreground px-8 py-3 rounded-lg font-medium hover:bg-primary/90 transition-colors"
+            >
+              {mode === 'online' ? 'Find New Match' : 'Play Again'}
+            </button>
+            
+            <button
+              onClick={() => {
+                if (mode === 'online') {
+                  disconnect();
+                  clearOnlineSession();
+                }
+                resetGame('local', difficulty, storedBoardSize);
+                setLocation('/');
+              }}
+              className="bg-secondary text-secondary-foreground px-8 py-3 rounded-lg font-medium hover:bg-secondary/80 transition-colors"
+            >
+              Exit
+            </button>
+          </div>
+        )}
 
         {/* Resign (online) */}
         {mode === 'online' && !effectiveWinner && status === 'in_game' && (
           <button
-            onClick={() => { useOnlineStore.getState().resign(); setLocation('/play'); }}
+            onClick={() => {
+              useOnlineStore.getState().resign();
+              clearOnlineSession();
+              resetGame('online', difficulty, storedBoardSize);
+              setLocation('/play');
+            }}
             className="mt-8 text-xs text-muted-foreground hover:text-foreground transition-colors underline underline-offset-2"
           >
             Resign
@@ -393,6 +421,24 @@ useEffect(() => {
       </div>
 
       <RulesModal open={rulesOpen} onClose={() => setRulesOpen(false)} />
+      
+      {/* Rematch Modal */}
+      <RematchModal
+        open={!!rematchOffer}
+        opponentName={rematchOffer?.from || 'Opponent'}
+        isWaiting={isWaitingForRematch}
+        onAccept={() => {
+          requestRematch();
+          setRematchOffer(null);
+        }}
+        onDecline={() => {
+          declineRematch();
+          setRematchOffer(null);
+          setIsWaitingForRematchResponse(false);
+          clearOnlineSession();
+          setLocation('/play');
+        }}
+      />
     </Layout>
   );
 }
