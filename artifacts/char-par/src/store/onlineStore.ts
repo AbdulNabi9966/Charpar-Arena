@@ -308,7 +308,9 @@ export const useOnlineStore = create<OnlineState>((set, get) => ({
       return;
     }
     
-    console.log('🎯 Joining queue:', { mode, userId, username, boardSize });
+    console.log('🎯 Joining queue with boardSize:', boardSize);
+    console.log('🎯 Full join data:', { mode, userId, username, boardSize });
+    
     joinInProgress = true;
     set({ status: 'searching', error: null });
     socket.emit('join_queue', { mode, userId, username, boardSize });
