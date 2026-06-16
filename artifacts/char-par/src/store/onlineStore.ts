@@ -133,7 +133,6 @@ export const useOnlineStore = create<OnlineState>((set, get) => ({
     }) => {
       console.log('🎮 Matched! Game:', data.gameId);
       
-      // Reset join flag on match
       joinInProgress = false;
       
       saveOnlineSession({
@@ -170,7 +169,6 @@ export const useOnlineStore = create<OnlineState>((set, get) => ({
     }) => {
       console.log('🔄 Reconnected to game:', data.gameId);
       
-      // Reset reconnection flags
       joinInProgress = false;
       
       saveOnlineSession({
@@ -193,7 +191,6 @@ export const useOnlineStore = create<OnlineState>((set, get) => ({
         error: null,
       });
       
-      // Dispatch reconnected event for UI
       window.dispatchEvent(new CustomEvent('reconnected', { detail: data }));
     });
 
@@ -295,7 +292,6 @@ export const useOnlineStore = create<OnlineState>((set, get) => ({
   },
 
   joinQueue: (mode: 'casual' | 'ranked', userId: string, username: string, boardSize: BoardSize = 3) => {
-    // Prevent duplicate joins
     if (joinInProgress) {
       console.log('⏭️ Join already in progress, skipping');
       return;
@@ -307,7 +303,6 @@ export const useOnlineStore = create<OnlineState>((set, get) => ({
       return;
     }
     
-    // Don't join if already in game or have a gameId
     if (status === 'in_game' || gameId) {
       console.log('⏭️ Already in game, not joining queue');
       return;
@@ -318,7 +313,6 @@ export const useOnlineStore = create<OnlineState>((set, get) => ({
     set({ status: 'searching', error: null });
     socket.emit('join_queue', { mode, userId, username, boardSize });
     
-    // Reset the flag after a delay
     setTimeout(() => {
       joinInProgress = false;
     }, 3000);
@@ -342,7 +336,6 @@ export const useOnlineStore = create<OnlineState>((set, get) => ({
 
     console.log('♟️ Making move:', { from, to, gameId, playerNum });
 
-    // Update local state optimistically
     const newBoard = [...gameState.board] as (1 | 2 | null)[];
     newBoard[to] = playerNum;
     if (from !== null) newBoard[from] = null;
