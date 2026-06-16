@@ -49,6 +49,9 @@ export type OnlineCounts = {
   searching: Record<number, number>;
 };
 
+// Prevent duplicate join attempts
+let joinInProgress = false;
+
 type OnlineState = {
   socket: Socket | null;
   status: OnlineStatus;
@@ -72,7 +75,7 @@ type OnlineState = {
   requestRematch: () => void;
   declineRematch: () => void;
   clearRematch: () => void;
-  rejoinGame: (gameId: string, userId: string, username: string) => void; // Add this
+  rejoinGame: (gameId: string, userId: string, username: string) => void;
 };
 
 export const useOnlineStore = create<OnlineState>((set, get) => ({
@@ -109,7 +112,6 @@ export const useOnlineStore = create<OnlineState>((set, get) => ({
       console.log('🔌 Socket connected');
       socket.emit('register', { userId, username });
 
-      // If we have a saved session, try to rejoin that game first
       const saved = loadOnlineSession();
       if (saved && saved.userId === userId) {
         console.log('🔄 Found saved session, rejoining game:', saved.gameId);
@@ -130,6 +132,9 @@ export const useOnlineStore = create<OnlineState>((set, get) => ({
       isRematch?: boolean;
     }) => {
       console.log('🎮 Matched! Game:', data.gameId);
+      
+      // Reset join flag on match
+      joinInProgress = false;
       
       saveOnlineSession({
         gameId: data.gameId,
@@ -164,6 +169,20 @@ export const useOnlineStore = create<OnlineState>((set, get) => ({
       state: OnlineGameState;
     }) => {
       console.log('🔄 Reconnected to game:', data.gameId);
+      
+      // Reset reconnection flags
+      joinInProgress = false;
+      
+      saveOnlineSession({
+        gameId: data.gameId,
+        playerNum: data.playerNumber,
+        opponent: data.opponent,
+        qmode: 'casual',
+        userId,
+        username,
+        boardSize: data.state.boardSize,
+      });
+      
       set({
         status: 'in_game',
         gameId: data.gameId,
@@ -174,10 +193,8 @@ export const useOnlineStore = create<OnlineState>((set, get) => ({
         error: null,
       });
       
-      const saved = loadOnlineSession();
-      if (saved) {
-        saveOnlineSession({ ...saved, gameId: data.gameId });
-      }
+      // Dispatch reconnected event for UI
+      window.dispatchEvent(new CustomEvent('reconnected', { detail: data }));
     });
 
     socket.on('move_made', (data: {
@@ -204,6 +221,7 @@ export const useOnlineStore = create<OnlineState>((set, get) => ({
 
     socket.on('queue_left', () => {
       console.log('🚪 Left queue');
+      joinInProgress = false;
       set({ status: 'disconnected' });
     });
 
@@ -277,20 +295,40 @@ export const useOnlineStore = create<OnlineState>((set, get) => ({
   },
 
   joinQueue: (mode: 'casual' | 'ranked', userId: string, username: string, boardSize: BoardSize = 3) => {
-    const { socket } = get();
+    // Prevent duplicate joins
+    if (joinInProgress) {
+      console.log('⏭️ Join already in progress, skipping');
+      return;
+    }
+    
+    const { socket, status, gameId } = get();
     if (!socket?.connected) {
       set({ error: 'Not connected to server' });
       return;
     }
+    
+    // Don't join if already in game or have a gameId
+    if (status === 'in_game' || gameId) {
+      console.log('⏭️ Already in game, not joining queue');
+      return;
+    }
+    
     console.log('🎯 Joining queue:', { mode, userId, username, boardSize });
+    joinInProgress = true;
     set({ status: 'searching', error: null });
     socket.emit('join_queue', { mode, userId, username, boardSize });
+    
+    // Reset the flag after a delay
+    setTimeout(() => {
+      joinInProgress = false;
+    }, 3000);
   },
 
   leaveQueue: () => {
     const { socket } = get();
     if (!socket?.connected) return;
     console.log('🚪 Leaving queue');
+    joinInProgress = false;
     socket.emit('leave_queue');
     set({ status: 'disconnected' });
   },
@@ -304,6 +342,7 @@ export const useOnlineStore = create<OnlineState>((set, get) => ({
 
     console.log('♟️ Making move:', { from, to, gameId, playerNum });
 
+    // Update local state optimistically
     const newBoard = [...gameState.board] as (1 | 2 | null)[];
     newBoard[to] = playerNum;
     if (from !== null) newBoard[from] = null;
@@ -336,6 +375,7 @@ export const useOnlineStore = create<OnlineState>((set, get) => ({
     if (!socket?.connected || !gameId || !playerNum) return;
     console.log('🏳️ Resigning from game:', gameId);
     socket.emit('resign', { gameId, playerNumber: playerNum });
+    joinInProgress = false;
     clearOnlineSession();
     set({ 
       status: 'disconnected', 
@@ -348,6 +388,7 @@ export const useOnlineStore = create<OnlineState>((set, get) => ({
   disconnect: () => {
     const { socket } = get();
     console.log('🔌 Disconnecting socket');
+    joinInProgress = false;
     if (socket) socket.disconnect();
     clearOnlineSession();
     set({
@@ -387,6 +428,7 @@ export const useOnlineStore = create<OnlineState>((set, get) => ({
     console.log('❌ Declining rematch for game:', gameId);
     set({ isWaitingForRematch: false });
     socket.emit('decline_rematch', { gameId });
+    joinInProgress = false;
     clearOnlineSession();
     set({ status: 'disconnected', gameId: null });
   },
@@ -395,7 +437,6 @@ export const useOnlineStore = create<OnlineState>((set, get) => ({
     set({ isWaitingForRematch: false });
   },
 
-  // ── REJOIN GAME METHOD ──
   rejoinGame: (gameId: string, userId: string, username: string) => {
     const { socket } = get();
     if (!socket?.connected) {
