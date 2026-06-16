@@ -252,4 +252,173 @@ export default function Game() {
         {/* Online opponent banner */}
         {mode === 'online' && opponent && (
           <div className="mb-5 flex items-center gap-4 text-sm">
-            <span className={`font-semibold ${playerNum === 1 ? 'text-red-400' : 'text-muted-foreground'}`
+            <span className={`font-semibold ${playerNum === 1 ? 'text-red-400' : 'text-muted-foreground'}`}>
+              You ({playerNum === 1 ? '🔴' : '🔵'})
+            </span>
+            <span className="text-muted-foreground text-xs uppercase tracking-widest">vs</span>
+            <span className={`font-semibold ${playerNum === 2 ? 'text-red-400' : 'text-blue-400'}`}>
+              {opponent.username} ({playerNum === 2 ? '🔴' : '🔵'})
+            </span>
+            <span className="text-xs text-muted-foreground">· {onlineBoardSize}×{onlineBoardSize}</span>
+          </div>
+        )}
+
+        {/* Disconnect warning */}
+        {mode === 'online' && useOnlineStore.getState().error && (
+          <div className="mb-4 px-4 py-2 rounded-lg bg-yellow-500/10 border border-yellow-500/30 text-yellow-400 text-sm">
+            {useOnlineStore.getState().error}
+          </div>
+        )}
+
+        {/* Phase badge + turn */}
+        <div className="mb-6 text-center space-y-1.5 relative z-10">
+          <div className="flex items-center justify-center gap-2">
+            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-secondary text-secondary-foreground text-sm font-medium">
+              <span className={`w-1.5 h-1.5 rounded-full ${currentPhase === 'placement' ? 'bg-amber-400' : 'bg-emerald-400'}`} />
+              {currentPhase === 'placement' ? 'Placement' : 'Movement'}
+            </div>
+            <div className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-secondary/60 text-secondary-foreground/70 text-xs">
+              {activeBoardSize}×{activeBoardSize}
+            </div>
+            <button
+              onClick={() => setRulesOpen(true)}
+              className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-secondary/60 text-secondary-foreground/70 text-xs hover:bg-secondary hover:text-secondary-foreground transition-colors"
+              title="View rules"
+            >
+              📖
+            </button>
+          </div>
+
+          <h2 className="text-2xl font-bold tracking-tight h-8">
+            {effectiveWinner ? (
+              <span className="text-primary">
+                {mode === 'online'
+                  ? effectiveWinner === playerNum ? '🎉 You Win!' : 'You Lose'
+                  : `Player ${effectiveWinner} Wins!`}
+              </span>
+            ) : (
+              <span className={!isMyTurn ? 'text-muted-foreground' : ''}>{turnLabel}</span>
+            )}
+          </h2>
+
+          {/* Resign reason badge */}
+          {effectiveWinner && mode === 'online' && winReason === 'resign' && (
+            <div className={[
+              'inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium mt-1',
+              effectiveWinner === playerNum
+                ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30'
+                : 'bg-muted text-muted-foreground border border-border',
+            ].join(' ')}>
+              <span>🏳️</span>
+              {effectiveWinner === playerNum
+                ? `${opponent?.username ?? 'Opponent'} resigned`
+                : 'You resigned'}
+            </div>
+          )}
+
+          {!effectiveWinner && currentPhase === 'movement' && isMyTurn && (
+            <p className="text-xs text-muted-foreground">
+              {(mode === 'online' ? onlineSelected : useGameStore.getState().selectedPiece) !== null
+                ? 'Tap a glowing spot to move there'
+                : 'Tap one of your pieces to select it'}
+            </p>
+          )}
+          {!effectiveWinner && currentPhase === 'placement' && mode !== 'online' && (
+            <p className="text-xs text-muted-foreground">
+              {piecesPlaced[currentPlayer]}/{storedBoardSize} pieces placed
+            </p>
+          )}
+        </div>
+
+        {/* Board */}
+        <div className={[
+          'relative z-10 w-full max-w-[420px] mx-auto',
+          (!isMyTurn || (mode === 'ai' && currentPlayer === 2)) && !effectiveWinner
+            ? 'pointer-events-none' : '',
+        ].join(' ')}>
+          <Board
+            overrideBoard={displayBoard}
+            overrideSelected={mode === 'online' ? onlineSelected : undefined}
+            overrideValidMoves={mode === 'online' ? onlineValidMoves : undefined}
+            overrideBoardSize={mode === 'online' ? onlineBoardSize : undefined}
+            onCellClick={mode === 'online' ? handleOnlineCellClick : undefined}
+          />
+        </div>
+
+        {/* Piece counter (local / AI, placement) */}
+        {!effectiveWinner && currentPhase === 'placement' && mode !== 'online' && (
+          <div className="mt-5 flex gap-6 text-sm text-muted-foreground">
+            <span className="flex items-center gap-1.5">
+              <span className="w-2.5 h-2.5 rounded-full bg-red-500 inline-block" />
+              P1 {piecesPlaced[1]}/{storedBoardSize}
+            </span>
+            <span className="flex items-center gap-1.5">
+              <span className="w-2.5 h-2.5 rounded-full bg-blue-500 inline-block" />
+              {mode === 'ai' ? 'AI' : 'P2'} {piecesPlaced[2]}/{storedBoardSize}
+            </span>
+          </div>
+        )}
+
+        {/* End-game buttons */}
+        {effectiveWinner && (
+          <div className="mt-10 flex gap-4 animate-in fade-in slide-in-from-bottom-4 relative z-10 flex-wrap justify-center">
+            {/* Rematch button - only for online mode */}
+            {mode === 'online' && (
+              <button
+                onClick={requestRematch}
+                disabled={isWaitingForRematch}
+                className="bg-emerald-500 text-white px-8 py-3 rounded-lg font-medium hover:bg-emerald-600 transition-colors disabled:opacity-50"
+              >
+                {isWaitingForRematch ? 'Waiting for opponent...' : 'Request Rematch'}
+              </button>
+            )}
+            <button
+              onClick={() => {
+                if (mode === 'online') { disconnect(); setLocation('/play'); }
+                else resetGame(mode as 'local' | 'ai', difficulty, storedBoardSize);
+              }}
+              className="bg-primary text-primary-foreground px-8 py-3 rounded-lg font-medium hover:bg-primary/90 transition-colors"
+            >
+              {mode === 'online' ? 'Find New Match' : 'Play Again'}
+            </button>
+            <button
+              onClick={() => setLocation('/play')}
+              className="bg-secondary text-secondary-foreground px-8 py-3 rounded-lg font-medium hover:bg-secondary/80 transition-colors"
+            >
+              Exit
+            </button>
+          </div>
+        )}
+
+        {/* Resign (online) */}
+        {mode === 'online' && !effectiveWinner && status === 'in_game' && (
+          <button
+            onClick={() => { useOnlineStore.getState().resign(); setLocation('/play'); }}
+            className="mt-8 text-xs text-muted-foreground hover:text-foreground transition-colors underline underline-offset-2"
+          >
+            Resign
+          </button>
+        )}
+      </div>
+
+      <RulesModal open={rulesOpen} onClose={() => setRulesOpen(false)} />
+
+      {/* Rematch Modal */}
+      <RematchModal
+        open={!!rematchOffer}
+        opponentName={rematchOffer?.from || 'Opponent'}
+        isWaiting={isWaitingForRematch}
+        onAccept={() => {
+          requestRematch();
+          setRematchOffer(null);
+        }}
+        onDecline={() => {
+          declineRematch();
+          setRematchOffer(null);
+          clearOnlineSession();
+          setLocation('/play');
+        }}
+      />
+    </Layout>
+  );
+}
