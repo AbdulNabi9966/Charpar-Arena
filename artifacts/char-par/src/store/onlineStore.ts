@@ -63,7 +63,6 @@ type OnlineState = {
   error: string | null;
   winReason: string | null;
   onlineCounts: OnlineCounts | null;
-  // local UI selection for online board
   onlineSelected: number | null;
   isWaitingForRematch: boolean;
 
@@ -101,7 +100,11 @@ export const useOnlineStore = create<OnlineState>((set, get) => ({
 
     set({ status: 'connecting', error: null });
 
-    const socket = io('https://charpar-arena.onrender.com', {
+    // ── USE ENVIRONMENT VARIABLE ──────────────────────────────────────────────
+    const API_URL = import.meta.env.VITE_API_URL || 'https://charpar-arena.onrender.com';
+    console.log('🔌 Connecting to Socket.IO server at:', API_URL);
+
+    const socket = io(API_URL, {
       path: '/api/socket.io',
       transports: ['websocket', 'polling'],
       reconnection: true,
@@ -110,7 +113,7 @@ export const useOnlineStore = create<OnlineState>((set, get) => ({
     });
 
     socket.on('connect', () => {
-      console.log('🔌 Socket connected');
+      console.log('🔌 Socket connected successfully');
       socket.emit('register', { userId, username });
 
       // If we have a saved session, try to rejoin that game first
@@ -120,13 +123,26 @@ export const useOnlineStore = create<OnlineState>((set, get) => ({
         socket.emit('rejoin_game', { gameId: saved.gameId, userId, username });
       }
 
-      // Only reset to disconnected if we weren't already in_game
       const { status } = get();
       if (status !== 'in_game') {
         set({ status: 'disconnected' });
       }
     });
 
+    socket.on('connect_error', (err) => {
+      console.error('❌ Connection error:', err.message);
+      set({ error: `Connection error: ${err.message}` });
+    });
+
+    socket.on('disconnect', () => {
+      console.log('🔌 Socket disconnected');
+      const { status } = get();
+      if (status !== 'in_game') {
+        set({ status: 'disconnected' });
+      }
+    });
+
+    // ── All other event handlers ──────────────────────────────────────────────
     socket.on('matched', (data: {
       gameId: string;
       playerNumber: 1 | 2;
@@ -245,14 +261,12 @@ export const useOnlineStore = create<OnlineState>((set, get) => ({
           isWaitingForRematch: false,
         });
       }
-      // Don't clear session immediately - allow rematch
     });
 
     socket.on('game_completed', (data: { gameId: string; winnerId: string; winnerUsername: string }) => {
       console.log('✅ Game completed:', data);
     });
 
-    // Rematch event handlers
     socket.on('rematch_offered', (data: { by: string }) => {
       console.log('💬 Rematch offered by:', data.by);
       set({ error: null });
@@ -274,19 +288,6 @@ export const useOnlineStore = create<OnlineState>((set, get) => ({
     socket.on('rematch_error', (data: { error: string }) => {
       console.log('❌ Rematch error:', data.error);
       set({ error: data.error, isWaitingForRematch: false });
-    });
-
-    socket.on('disconnect', () => {
-      console.log('🔌 Socket disconnected');
-      const { status } = get();
-      if (status !== 'in_game') {
-        set({ status: 'disconnected' });
-      }
-    });
-
-    socket.on('connect_error', (err) => {
-      console.log('❌ Connection error:', err.message);
-      set({ error: `Connection error: ${err.message}` });
     });
 
     socket.on('online_counts', (data: OnlineCounts) => {
@@ -341,7 +342,6 @@ export const useOnlineStore = create<OnlineState>((set, get) => ({
 
     console.log('♟️ Making move:', { from, to, gameId, playerNum });
 
-    // Optimistic update: apply the move locally for instant visual feedback.
     const newBoard = [...gameState.board] as (1 | 2 | null)[];
     newBoard[to] = playerNum;
     if (from !== null) newBoard[from] = null;
