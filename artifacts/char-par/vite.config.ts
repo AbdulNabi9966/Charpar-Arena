@@ -2,7 +2,6 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import path from "path";
-import runtimeErrorOverlay from "@replit/vite-plugin-runtime-error-modal";
 
 const port = Number(process.env.PORT || 3000);
 
@@ -12,25 +11,22 @@ if (Number.isNaN(port) || port <= 0) {
 
 const basePath = process.env.BASE_PATH || "/";
 
+// ── Determine API URL for proxy ──────────────────────────────────────────────
+// For local development, proxy to backend
+// For production, use environment variable
+const isDev = process.env.NODE_ENV !== "production";
+const apiTarget = isDev 
+  ? "http://localhost:8080"  // Local backend
+  : process.env.VITE_API_URL || "https://charpar-arena.onrender.com";
+
+console.log(`🔧 API Target: ${apiTarget}`);
+console.log(`🔧 Environment: ${process.env.NODE_ENV || 'development'}`);
+
 export default defineConfig({
   base: basePath,
   plugins: [
     react(),
     tailwindcss(),
-    runtimeErrorOverlay(),
-    ...(process.env.NODE_ENV !== "production" &&
-    process.env.REPL_ID !== undefined
-      ? [
-          await import("@replit/vite-plugin-cartographer").then((m) =>
-            m.cartographer({
-              root: path.resolve(import.meta.dirname, ".."),
-            }),
-          ),
-          await import("@replit/vite-plugin-dev-banner").then((m) =>
-            m.devBanner(),
-          ),
-        ]
-      : []),
   ],
   resolve: {
     alias: {
@@ -48,19 +44,27 @@ export default defineConfig({
   build: {
     outDir: "dist",
     emptyOutDir: true,
+    sourcemap: true,
   },
   server: {
     port,
     strictPort: true,
     host: "0.0.0.0",
     allowedHosts: true,
-    proxy: {
+    // ── Only proxy in development ──────────────────────────────────────────────
+    proxy: isDev ? {
       '/api': {
-        target: 'http://localhost:8080',
+        target: apiTarget,
+        ws: true,
+        changeOrigin: true,
+        rewrite: (path) => path,
+      },
+      '/socket.io': {
+        target: apiTarget,
         ws: true,
         changeOrigin: true,
       },
-    },
+    } : undefined,
     fs: {
       strict: true,
     },
