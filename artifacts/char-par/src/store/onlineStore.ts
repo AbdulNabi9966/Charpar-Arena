@@ -14,7 +14,6 @@ export type OnlineGameState = {
   boardSize: BoardSize;
 };
 
-// Saved to sessionStorage so a page refresh can reconnect
 type PersistedSession = {
   gameId: string;
   playerNum: 1 | 2;
@@ -60,7 +59,6 @@ type OnlineState = {
   error: string | null;
   winReason: string | null;
   onlineCounts: OnlineCounts | null;
-  // local UI selection for online board
   onlineSelected: number | null;
   isWaitingForRematch: boolean;
 
@@ -74,6 +72,7 @@ type OnlineState = {
   requestRematch: () => void;
   declineRematch: () => void;
   clearRematch: () => void;
+  rejoinGame: (gameId: string, userId: string, username: string) => void; // Add this
 };
 
 export const useOnlineStore = create<OnlineState>((set, get) => ({
@@ -107,15 +106,16 @@ export const useOnlineStore = create<OnlineState>((set, get) => ({
     });
 
     socket.on('connect', () => {
+      console.log('🔌 Socket connected');
       socket.emit('register', { userId, username });
 
       // If we have a saved session, try to rejoin that game first
       const saved = loadOnlineSession();
       if (saved && saved.userId === userId) {
+        console.log('🔄 Found saved session, rejoining game:', saved.gameId);
         socket.emit('rejoin_game', { gameId: saved.gameId, userId, username });
       }
 
-      // Only reset to disconnected if we weren't already in_game
       const { status } = get();
       if (status !== 'in_game') {
         set({ status: 'disconnected' });
@@ -129,7 +129,8 @@ export const useOnlineStore = create<OnlineState>((set, get) => ({
       state: OnlineGameState;
       isRematch?: boolean;
     }) => {
-      // Save session for reconnection
+      console.log('🎮 Matched! Game:', data.gameId);
+      
       saveOnlineSession({
         gameId: data.gameId,
         playerNum: data.playerNumber,
@@ -151,7 +152,6 @@ export const useOnlineStore = create<OnlineState>((set, get) => ({
         error: null,
       });
       
-      // If this is a rematch, notify UI
       if (data.isRematch) {
         window.dispatchEvent(new CustomEvent('rematch-started', { detail: data }));
       }
@@ -163,6 +163,7 @@ export const useOnlineStore = create<OnlineState>((set, get) => ({
       opponent: { id: string; username: string };
       state: OnlineGameState;
     }) => {
+      console.log('🔄 Reconnected to game:', data.gameId);
       set({
         status: 'in_game',
         gameId: data.gameId,
@@ -172,7 +173,7 @@ export const useOnlineStore = create<OnlineState>((set, get) => ({
         onlineSelected: null,
         error: null,
       });
-      // Update persisted session with fresh state
+      
       const saved = loadOnlineSession();
       if (saved) {
         saveOnlineSession({ ...saved, gameId: data.gameId });
@@ -186,32 +187,38 @@ export const useOnlineStore = create<OnlineState>((set, get) => ({
       playerNumber: 1 | 2;
       state: OnlineGameState;
     }) => {
+      console.log('♟️ Move made:', data.from, '->', data.to);
       set({ gameState: data.state, onlineSelected: null });
     });
 
     socket.on('move_error', (data: { error: string }) => {
+      console.log('❌ Move error:', data.error);
       set({ error: data.error });
-      // Clear error after 3 seconds
       setTimeout(() => set({ error: null }), 3000);
     });
 
     socket.on('queued', (data: { position?: number; mode?: string; boardSize?: number }) => {
+      console.log('⏳ Queued:', data);
       set({ status: 'searching' });
     });
 
     socket.on('queue_left', () => {
+      console.log('🚪 Left queue');
       set({ status: 'disconnected' });
     });
 
     socket.on('opponent_disconnected', () => {
+      console.log('⚠️ Opponent disconnected');
       set({ error: 'Opponent disconnected. Waiting for them to reconnect...' });
     });
 
     socket.on('opponent_reconnected', () => {
+      console.log('✅ Opponent reconnected');
       set({ error: null });
     });
 
     socket.on('game_over', (data: { gameId: string; winnerPlayerNumber: 1 | 2; reason: string }) => {
+      console.log('🏁 Game over:', data);
       const { gameState } = get();
       if (gameState) {
         set({
@@ -220,23 +227,20 @@ export const useOnlineStore = create<OnlineState>((set, get) => ({
           isWaitingForRematch: false,
         });
       }
-      // Don't clear session immediately - allow rematch
-      // clearOnlineSession();
     });
 
     socket.on('game_completed', (data: { gameId: string; winnerId: string; winnerUsername: string }) => {
-      // Game is fully finalized, ready for rematch
-      console.log('Game completed:', data);
+      console.log('✅ Game completed:', data);
     });
 
-    // Rematch event handlers
     socket.on('rematch_offered', (data: { by: string }) => {
+      console.log('💬 Rematch offered by:', data.by);
       set({ error: null });
-      // Emit a custom event that your UI can listen for
       window.dispatchEvent(new CustomEvent('rematch-offered', { detail: data }));
     });
 
     socket.on('rematch_declined', () => {
+      console.log('❌ Rematch declined');
       set({ 
         error: 'Opponent declined the rematch',
         isWaitingForRematch: false,
@@ -248,23 +252,12 @@ export const useOnlineStore = create<OnlineState>((set, get) => ({
     });
 
     socket.on('rematch_error', (data: { error: string }) => {
+      console.log('❌ Rematch error:', data.error);
       set({ error: data.error, isWaitingForRematch: false });
     });
 
-    // Add this to your onlineStore.ts - add a rejoinGame method
-
-rejoinGame: (gameId: string, userId: string, username: string) => {
-  const { socket } = get();
-  if (!socket?.connected) {
-    set({ error: 'Not connected to server' });
-    return;
-  }
-  console.log('🔄 Rejoining game:', gameId);
-  socket.emit('rejoin_game', { gameId, userId, username });
-},
-
     socket.on('disconnect', () => {
-      // Keep in_game status — socket.io will auto-reconnect
+      console.log('🔌 Socket disconnected');
       const { status } = get();
       if (status !== 'in_game') {
         set({ status: 'disconnected' });
@@ -272,6 +265,7 @@ rejoinGame: (gameId: string, userId: string, username: string) => {
     });
 
     socket.on('connect_error', (err) => {
+      console.log('❌ Connection error:', err.message);
       set({ error: `Connection error: ${err.message}` });
     });
 
@@ -288,6 +282,7 @@ rejoinGame: (gameId: string, userId: string, username: string) => {
       set({ error: 'Not connected to server' });
       return;
     }
+    console.log('🎯 Joining queue:', { mode, userId, username, boardSize });
     set({ status: 'searching', error: null });
     socket.emit('join_queue', { mode, userId, username, boardSize });
   },
@@ -295,15 +290,20 @@ rejoinGame: (gameId: string, userId: string, username: string) => {
   leaveQueue: () => {
     const { socket } = get();
     if (!socket?.connected) return;
+    console.log('🚪 Leaving queue');
     socket.emit('leave_queue');
     set({ status: 'disconnected' });
   },
 
   makeMove: (from: number | null, to: number) => {
     const { socket, gameId, playerNum, gameState } = get();
-    if (!socket?.connected || !gameId || !playerNum || !gameState) return;
+    if (!socket?.connected || !gameId || !playerNum || !gameState) {
+      console.log('❌ Cannot make move: missing required state');
+      return;
+    }
 
-    // Optimistic update: apply the move locally for instant visual feedback.
+    console.log('♟️ Making move:', { from, to, gameId, playerNum });
+
     const newBoard = [...gameState.board] as (1 | 2 | null)[];
     newBoard[to] = playerNum;
     if (from !== null) newBoard[from] = null;
@@ -334,6 +334,7 @@ rejoinGame: (gameId: string, userId: string, username: string) => {
   resign: () => {
     const { socket, gameId, playerNum } = get();
     if (!socket?.connected || !gameId || !playerNum) return;
+    console.log('🏳️ Resigning from game:', gameId);
     socket.emit('resign', { gameId, playerNumber: playerNum });
     clearOnlineSession();
     set({ 
@@ -346,6 +347,7 @@ rejoinGame: (gameId: string, userId: string, username: string) => {
 
   disconnect: () => {
     const { socket } = get();
+    console.log('🔌 Disconnecting socket');
     if (socket) socket.disconnect();
     clearOnlineSession();
     set({
@@ -374,6 +376,7 @@ rejoinGame: (gameId: string, userId: string, username: string) => {
       set({ error: 'Already waiting for rematch response' });
       return;
     }
+    console.log('🔄 Requesting rematch for game:', gameId);
     set({ isWaitingForRematch: true, error: null });
     socket.emit('request_rematch', { gameId });
   },
@@ -381,6 +384,7 @@ rejoinGame: (gameId: string, userId: string, username: string) => {
   declineRematch: () => {
     const { socket, gameId } = get();
     if (!socket?.connected || !gameId) return;
+    console.log('❌ Declining rematch for game:', gameId);
     set({ isWaitingForRematch: false });
     socket.emit('decline_rematch', { gameId });
     clearOnlineSession();
@@ -389,5 +393,16 @@ rejoinGame: (gameId: string, userId: string, username: string) => {
 
   clearRematch: () => {
     set({ isWaitingForRematch: false });
+  },
+
+  // ── REJOIN GAME METHOD ──
+  rejoinGame: (gameId: string, userId: string, username: string) => {
+    const { socket } = get();
+    if (!socket?.connected) {
+      set({ error: 'Not connected to server' });
+      return;
+    }
+    console.log('🔄 Rejoining game:', gameId);
+    socket.emit('rejoin_game', { gameId, userId, username });
   },
 }));
