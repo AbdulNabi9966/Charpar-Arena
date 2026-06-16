@@ -82,7 +82,6 @@ export default function Game() {
 
   const onlineStoreSet = useOnlineStore.setState;
 
-  // ── FORCE RESET ────────────────────────────────────────────────────────────
   const forceResetOnlineState = () => {
     console.log('🔥 forceResetOnlineState called');
     setIsCleaningUp(true);
@@ -128,7 +127,6 @@ export default function Game() {
     }, 200);
   };
 
-  // ── Complete cleanup ──────────────────────────────────────────────────────
   const fullCleanup = () => {
     if (isUnmounting.current || isCleaningUp) return;
     isUnmounting.current = true;
@@ -147,7 +145,6 @@ export default function Game() {
     }, 200);
   };
 
-  // ── Navigate with cleanup ────────────────────────────────────────────────
   const navigateWithCleanup = (path: string) => {
     fullCleanup();
     setTimeout(() => {
@@ -155,7 +152,6 @@ export default function Game() {
     }, 200);
   };
 
-  // ── Resign handler ────────────────────────────────────────────────────────
   const handleResign = () => {
     if (mode === 'online') {
       const currentGameId = useOnlineStore.getState().gameId;
@@ -173,7 +169,6 @@ export default function Game() {
     navigateWithCleanup('/play');
   };
 
-  // ── Attempt reconnection ──────────────────────────────────────────────────
   const attemptReconnection = (userId: string, username: string) => {
     if (reconnectionAttempted.current || hasReconnected.current) {
       console.log('⏭️ Reconnection already handled, skipping');
@@ -228,7 +223,6 @@ export default function Game() {
     }
   };
 
-  // ── Join queue ────────────────────────────────────────────────────────────
   const attemptJoinQueue = (userId: string, username: string) => {
     if (joinAttempted) {
       console.log('⏭️ Join already attempted, skipping');
@@ -251,24 +245,22 @@ export default function Game() {
       return;
     }
 
-    // Check if we're already in queue via the store
     if (st === 'searching') {
       console.log('⏭️ Already searching, skipping join');
       return;
     }
 
-    console.log('🎯 Joining queue');
+    console.log('🎯 Joining queue with boardSize:', boardSize);
     setJoinAttempted(true);
     joinQueue(qmode, userId, username, boardSize);
   };
 
-  // ── Init ─────────────────────────────────────────────────────────────────
   useEffect(() => {
     if (mode === 'online') {
       if (initialized.current) return;
       if (!userId) return;
 
-      console.log('🎮 Initializing online mode');
+      console.log('🎮 Initializing online mode with boardSize:', boardSize);
       initialized.current = true;
 
       forceResetOnlineState();
@@ -276,14 +268,11 @@ export default function Game() {
       const username = me?.username ?? 'Player';
       connect(userId, username, token ?? '');
 
-      // Wait for connection then attempt reconnection or join
       setTimeout(() => {
         if (!joinAttempted && status !== 'in_game' && !onlineGameId) {
           attemptReconnection(userId, username);
         }
       }, 1500);
-
-      // ── REMOVED: Fallback timer that was causing duplicate joins ────
 
       return () => {
         if (joinTimeoutRef.current) clearTimeout(joinTimeoutRef.current);
@@ -297,7 +286,6 @@ export default function Game() {
     }
   }, [userId]);
 
-  // ── Monitor socket connection and join when ready ───────────────────────
   useEffect(() => {
     if (mode !== 'online') return;
     if (!userId) return;
@@ -318,7 +306,6 @@ export default function Game() {
     }
   }, [socket?.connected, status, userId, mode, onlineGameId, joinAttempted]);
 
-  // ── Listen for reconnected event ─────────────────────────────────────────
   useEffect(() => {
     if (mode !== 'online') return;
 
@@ -336,7 +323,6 @@ export default function Game() {
     };
   }, [mode]);
 
-  // ── Save session ──────────────────────────────────────────────────────────
   useEffect(() => {
     if (mode === 'online' && status === 'in_game' && playerNum && opponent && userId) {
       const currentGameId = useOnlineStore.getState().gameId;
@@ -354,7 +340,6 @@ export default function Game() {
     }
   }, [mode, status, playerNum, opponent, userId, qmode, boardSize, gameState?.boardSize]);
 
-  // ── AI turn ──────────────────────────────────────────────────────────────
   useEffect(() => {
     if (mode !== 'ai') return;
     if (currentPlayer !== 2 || winner) return;
@@ -404,7 +389,6 @@ export default function Game() {
     return () => { clearTimeout(timerId); aiPending.current = false; };
   }, [currentPlayer, phase, winner, mode, difficulty]);
 
-  // ── Derived values ────────────────────────────────────────────────────────
   const effectiveWinner = mode === 'online' ? (gameState?.winner ?? null) : winner;
   const currentPhase = mode === 'online' ? gameState?.phase : phase;
   const onlineBoardSize = gameState?.boardSize ?? boardSize;
@@ -449,7 +433,6 @@ export default function Game() {
 
   const activeBoardSize = mode === 'online' ? onlineBoardSize : storedBoardSize;
 
-  // ── Rematch event listener ──────────────────────────────────────────────
   useEffect(() => {
     if (mode !== 'online') return;
 
@@ -472,7 +455,6 @@ export default function Game() {
     };
   }, [mode]);
 
-  // ── Matchmaking screen ────────────────────────────────────────────────────
   if (mode === 'online' && status !== 'in_game' && !isCleaningUp && !isReconnecting) {
     return (
       <Layout>
@@ -500,7 +482,6 @@ export default function Game() {
     );
   }
 
-  // ── Render ─────────────────────────────────────────────────────────────────
   return (
     <Layout>
       {effectiveWinner && <Confetti />}
