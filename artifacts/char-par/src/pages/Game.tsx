@@ -250,7 +250,7 @@ export default function Game() {
       return;
     }
 
-    console.log('🎯 Joining queue with boardSize:', boardSize);
+    console.log('🎯 Joining queue with boardSize from URL:', boardSize);
     setJoinAttempted(true);
     joinQueue(qmode, userId, username, boardSize);
   };
@@ -301,7 +301,7 @@ export default function Game() {
     const username = me?.username ?? 'Player';
     
     if (socket?.connected && status === 'disconnected') {
-      console.log('🔌 Socket connected, joining queue');
+      console.log('🔌 Socket connected, joining queue with boardSize:', boardSize);
       attemptJoinQueue(userId, username);
     }
   }, [socket?.connected, status, userId, mode, onlineGameId, joinAttempted]);
