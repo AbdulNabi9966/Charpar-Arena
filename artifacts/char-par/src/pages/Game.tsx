@@ -59,6 +59,7 @@ export default function Game() {
     isWaitingForRematch,
     socket,
     joinQueue,
+    gameId: onlineGameId, // Rename to avoid conflict
   } = useOnlineStore();
 
   const [rematchOffer, setRematchOffer] = useState<{ from: string } | null>(null);
@@ -185,11 +186,10 @@ export default function Game() {
       return;
     }
 
-    const { socket: s, status: st, gameId } = useOnlineStore.getState();
+    const { socket: s, status: st, gameId: currentGameId } = useOnlineStore.getState();
     
     if (!s?.connected) {
       console.log('⏳ Socket not connected, waiting...');
-      // Retry after delay
       if (joinTimeoutRef.current) {
         clearTimeout(joinTimeoutRef.current);
       }
@@ -199,7 +199,7 @@ export default function Game() {
       return;
     }
 
-    if (st === 'in_game' || gameId) {
+    if (st === 'in_game' || currentGameId) {
       console.log('⚠️ Already in game, skipping join');
       return;
     }
@@ -239,9 +239,8 @@ export default function Game() {
         
         setTimeout(() => {
           setIsReconnecting(false);
-          // If still not in game after 3 seconds, join queue
-          const { status: st } = useOnlineStore.getState();
-          if (st !== 'in_game') {
+          const { status: st, gameId: currentGameId } = useOnlineStore.getState();
+          if (st !== 'in_game' && !currentGameId) {
             console.log('⏰ Reconnection timeout, joining queue');
             setJoinAttempted(false);
             attemptJoinQueue(userId, username);
@@ -311,8 +310,8 @@ export default function Game() {
 
       // Fallback: if nothing happens after 5 seconds, force join
       const fallbackTimer = setTimeout(() => {
-        const { status: st, gameId } = useOnlineStore.getState();
-        if (st !== 'in_game' && !gameId && !joinAttempted) {
+        const { status: st, gameId: currentGameId } = useOnlineStore.getState();
+        if (st !== 'in_game' && !currentGameId && !joinAttempted) {
           console.log('⏰ Fallback: forcing join queue');
           setJoinAttempted(false);
           attemptJoinQueue(userId, username);
@@ -338,7 +337,7 @@ export default function Game() {
     if (mode !== 'online') return;
     if (!userId) return;
     if (joinAttempted) return;
-    if (status === 'in_game' || gameId) return;
+    if (status === 'in_game' || onlineGameId) return;
 
     const username = me?.username ?? 'Player';
     
@@ -348,7 +347,7 @@ export default function Game() {
       setJoinAttempted(false);
       attemptJoinQueue(userId, username);
     }
-  }, [socket?.connected, status, userId, mode, gameId]);
+  }, [socket?.connected, status, userId, mode, onlineGameId]);
 
   // ── Track game ID changes ───────────────────────────────────────────────
   useEffect(() => {
@@ -362,11 +361,11 @@ export default function Game() {
   // ── Save online session ──────────────────────────────────────────────────
   useEffect(() => {
     if (mode === 'online' && status === 'in_game' && playerNum && opponent && userId) {
-      const { gameId } = useOnlineStore.getState();
-      if (gameId && !isCleaningUp && !isReconnecting) {
-        console.log('💾 Saving session for game:', gameId);
+      const currentGameId = useOnlineStore.getState().gameId;
+      if (currentGameId && !isCleaningUp && !isReconnecting) {
+        console.log('💾 Saving session for game:', currentGameId);
         saveOnlineSession({
-          gameId,
+          gameId: currentGameId,
           playerNum,
           opponent,
           qmode,
