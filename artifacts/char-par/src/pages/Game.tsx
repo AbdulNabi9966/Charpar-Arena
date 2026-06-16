@@ -79,6 +79,8 @@ export default function Game() {
   const joinTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const reconnectCount = useRef(0);
   const reconnectTimerRef = useRef<NodeJS.Timeout | null>(null);
+  // Track if we're already reconnected to prevent duplicate reconnections
+  const hasReconnected = useRef(false);
 
   // ── Get the store's set function directly ────────────────────────────────
   const onlineStoreSet = useOnlineStore.setState;
@@ -116,6 +118,7 @@ export default function Game() {
 
     gameIdRef.current = null;
     reconnectionAttempted.current = false;
+    hasReconnected.current = false;
     setJoinAttempted(false);
     reconnectCount.current = 0;
 
@@ -177,13 +180,17 @@ export default function Game() {
       if (currentGameId && socket?.connected) {
         console.log('📤 Sending resign event');
         socket.emit('resign', { gameId: currentGameId, playerNumber: playerNum });
+        // Small delay to let the resign event send
+        setTimeout(() => {
+          navigateWithCleanup('/play');
+        }, 500);
+        setShowResignConfirm(false);
+        return;
       }
     }
     
     setShowResignConfirm(false);
-    setTimeout(() => {
-      navigateWithCleanup('/play');
-    }, 300);
+    navigateWithCleanup('/play');
   };
 
   // ── Join queue with retry ────────────────────────────────────────────────
@@ -221,11 +228,17 @@ export default function Game() {
       return;
     }
 
-    // Prevent reconnection loop - max 2 attempts
-    if (reconnectCount.current >= 2) {
-      console.log('⏭️ Max reconnection attempts reached, joining queue');
-      setJoinAttempted(false);
-      attemptJoinQueue(userId, username);
+    // If we already reconnected successfully, don't try again
+    if (hasReconnected.current) {
+      console.log('⏭️ Already reconnected, skipping');
+      return;
+    }
+
+    // Check if we're already in a game
+    const { gameState: currentGameState, status: currentStatus, gameId: currentGameId } = useOnlineStore.getState();
+    if (currentStatus === 'in_game' && currentGameState) {
+      console.log('✅ Already in a game, no reconnection needed');
+      hasReconnected.current = true;
       return;
     }
 
@@ -233,18 +246,9 @@ export default function Game() {
     console.log('💾 Saved session:', saved);
 
     if (saved && saved.userId === userId && saved.gameId) {
-      // Check if game is still active
-      const { gameState: currentGameState, status: currentStatus } = useOnlineStore.getState();
-      
-      // If we already have a game state and status is in_game, don't reconnect
-      if (currentStatus === 'in_game' && currentGameState) {
-        console.log('✅ Already in a game, no reconnection needed');
-        return;
-      }
-
       console.log('🔄 Found saved game, attempting to reconnect:', saved.gameId);
       setIsReconnecting(true);
-      reconnectCount.current += 1;
+      reconnectionAttempted.current = true;
       
       const { socket: s } = useOnlineStore.getState();
       if (s?.connected) {
@@ -262,7 +266,7 @@ export default function Game() {
           opponent: saved.opponent,
         });
         
-        // Set a timeout to stop reconnection attempts
+        // Set a timeout for reconnection
         if (reconnectTimerRef.current) {
           clearTimeout(reconnectTimerRef.current);
         }
@@ -271,12 +275,16 @@ export default function Game() {
           const { status: st, gameId: currentGameId } = useOnlineStore.getState();
           if (st !== 'in_game' && !currentGameId) {
             console.log('⏰ Reconnection timeout, joining queue');
+            reconnectionAttempted.current = false;
             setJoinAttempted(false);
             attemptJoinQueue(userId, username);
+          } else if (st === 'in_game') {
+            hasReconnected.current = true;
           }
-        }, 3000);
+        }, 5000);
       } else {
         setIsReconnecting(false);
+        reconnectionAttempted.current = false;
         setJoinAttempted(false);
         attemptJoinQueue(userId, username);
       }
@@ -293,6 +301,7 @@ export default function Game() {
     isUnmounting.current = false;
     setIsCleaningUp(false);
     reconnectionAttempted.current = false;
+    hasReconnected.current = false;
     setJoinAttempted(false);
     reconnectCount.current = 0;
 
@@ -343,7 +352,7 @@ export default function Game() {
       // Fallback: if nothing happens after 5 seconds, force join
       const fallbackTimer = setTimeout(() => {
         const { status: st, gameId: currentGameId } = useOnlineStore.getState();
-        if (st !== 'in_game' && !currentGameId && !joinAttempted) {
+        if (st !== 'in_game' && !currentGameId && !joinAttempted && !hasReconnected.current) {
           console.log('⏰ Fallback: forcing join queue');
           setJoinAttempted(false);
           attemptJoinQueue(userId, username);
@@ -375,6 +384,10 @@ export default function Game() {
       console.log('⏭️ Already in game, not joining');
       return;
     }
+    if (hasReconnected.current) {
+      console.log('⏭️ Already reconnected, not joining');
+      return;
+    }
 
     const username = me?.username ?? 'Player';
     
@@ -393,8 +406,28 @@ export default function Game() {
       gameIdRef.current = currentGameId;
       // Reset reconnect count when a new game is joined
       reconnectCount.current = 0;
+      // Don't reset hasReconnected here - it should persist for the game
     }
   }, [gameState]);
+
+  // ── Listen for reconnected event and mark as reconnected ──────────────────
+  useEffect(() => {
+    if (mode !== 'online') return;
+
+    const handleReconnected = () => {
+      console.log('✅ Reconnection successful, marking as reconnected');
+      hasReconnected.current = true;
+      setIsReconnecting(false);
+      reconnectionAttempted.current = false;
+    };
+
+    // Add listener for reconnected event
+    window.addEventListener('reconnected', handleReconnected);
+
+    return () => {
+      window.removeEventListener('reconnected', handleReconnected);
+    };
+  }, [mode]);
 
   // ── Save online session ──────────────────────────────────────────────────
   useEffect(() => {
@@ -582,16 +615,6 @@ export default function Game() {
             </div>
             <h3 className="text-xl font-semibold mb-2">Reconnecting to game...</h3>
             <p className="text-sm text-muted-foreground">Please wait while we restore your game.</p>
-            <button
-              onClick={() => {
-                console.log('🔄 Manual reconnect attempt');
-                setJoinAttempted(false);
-                attemptJoinQueue(userId, me?.username ?? 'Player');
-              }}
-              className="mt-4 text-sm text-primary hover:underline"
-            >
-              Try rejoining queue
-            </button>
           </div>
         </div>
       </Layout>
