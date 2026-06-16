@@ -70,12 +70,15 @@ export default function Game() {
   const initialized = useRef(false);
   const isUnmounting = useRef(false);
 
-  // ── Force reset online state ─────────────────────────────────────────────
+  // ── FORCE RESET - The nuclear option ──────────────────────────────────────
   const forceResetOnlineState = () => {
-    // Clear session storage
-    clearOnlineSession();
+    console.log('🔥 forceResetOnlineState called');
     
-    // Force reset online store state
+    // 1. Clear session storage
+    clearOnlineSession();
+    console.log('✅ Session cleared');
+
+    // 2. Force reset online store state
     useOnlineStore.setState({
       status: 'disconnected',
       gameId: null,
@@ -87,34 +90,40 @@ export default function Game() {
       error: null,
       isWaitingForRematch: false,
     });
-    
-    // Disconnect socket
+    console.log('✅ Online store reset');
+
+    // 3. Disconnect socket
     const { socket: s } = useOnlineStore.getState();
     if (s?.connected) {
       s.disconnect();
+      console.log('✅ Socket disconnected');
     }
+
+    // 4. Reset game store
+    resetGame('local', 'medium', 3);
+    console.log('✅ Game store reset');
   };
 
-  // ── Complete cleanup function ────────────────────────────────────────────
+  // ── Complete cleanup ──────────────────────────────────────────────────────
   const fullCleanup = () => {
-    if (isUnmounting.current) return;
+    console.log('🧹 fullCleanup called');
+    if (isUnmounting.current) {
+      console.log('⚠️ Already unmounting, skipping');
+      return;
+    }
     isUnmounting.current = true;
 
-    // 1. Force reset online state
     forceResetOnlineState();
 
-    // 2. Reset game store
-    resetGame('local', 'medium', 3);
-
-    // 3. Reset all local states
+    // Reset local states
     setRematchOffer(null);
     setIsWaitingForRematchResponse(false);
     setShowResignConfirm(false);
     setShowExitConfirm(false);
-
-    // 4. Reset flags
     aiPending.current = false;
     initialized.current = false;
+
+    console.log('✅ Full cleanup complete');
 
     setTimeout(() => {
       isUnmounting.current = false;
@@ -123,79 +132,84 @@ export default function Game() {
 
   // ── Navigate with cleanup ────────────────────────────────────────────────
   const navigateWithCleanup = (path: string) => {
+    console.log(`🚀 Navigating to ${path} with cleanup`);
     fullCleanup();
     setTimeout(() => {
+      console.log(`📍 Setting location to ${path}`);
       setLocation(path);
-    }, 50);
+    }, 100);
   };
-
-  // ── Handle game end - force reset online state ──────────────────────────
-  useEffect(() => {
-    if (mode === 'online' && gameState?.winner) {
-      // Don't clear immediately - allow rematch
-      // But we need to prepare for the next game
-      console.log('Game ended, preparing for next match...');
-    }
-  }, [mode, gameState?.winner]);
 
   // ── Resign handler ────────────────────────────────────────────────────────
   const handleResign = () => {
+    console.log('🏳️ Resign called, mode:', mode);
+    
     if (mode === 'online') {
       const currentGameId = useOnlineStore.getState().gameId;
+      console.log('Current gameId:', currentGameId);
       if (currentGameId && socket?.connected) {
+        console.log('📤 Sending resign event');
         socket.emit('resign', { gameId: currentGameId, playerNumber: playerNum });
       }
-      // Force reset and navigate
-      forceResetOnlineState();
-      fullCleanup();
-      setTimeout(() => setLocation('/play'), 100);
-    } else {
-      fullCleanup();
-      setTimeout(() => setLocation('/play'), 100);
     }
+    
     setShowResignConfirm(false);
+    console.log('🔄 Resigning and navigating to /play');
+    navigateWithCleanup('/play');
   };
 
   // ── Init ─────────────────────────────────────────────────────────────────
   useEffect(() => {
+    console.log('📌 Game init effect, mode:', mode, 'userId:', userId);
     isUnmounting.current = false;
 
     if (mode === 'local' || mode === 'ai') {
-      if (initialized.current) return;
+      if (initialized.current) {
+        console.log('⏭️ Already initialized, skipping');
+        return;
+      }
       initialized.current = true;
       const shouldRestore =
         storedBoardSize === boardSize &&
         ((mode === 'local' && gameMode === 'local') ||
           (mode === 'ai' && gameMode === 'ai' && aiDifficulty === difficulty));
       if (!shouldRestore) {
+        console.log('🔄 Resetting game');
         resetGame(mode as 'local' | 'ai', difficulty, boardSize);
       }
       return;
     }
 
     if (mode === 'online') {
-      if (initialized.current) return;
-      if (!userId) return;
+      if (initialized.current) {
+        console.log('⏭️ Already initialized, skipping');
+        return;
+      }
+      if (!userId) {
+        console.log('⏳ Waiting for userId...');
+        return;
+      }
 
+      console.log('🎮 Initializing online mode');
       initialized.current = true;
 
-      // Force reset any stale state before connecting
+      // Force reset any stale state
       forceResetOnlineState();
 
-      const { status: cur, gameState: curGs } = useOnlineStore.getState();
-      if (cur === 'in_game' && curGs) return;
-
       const username = me?.username ?? 'Player';
+      console.log('👤 Connecting user:', userId, username);
       connect(userId, username, token ?? '');
 
       let joinScheduled = false;
       const scheduleJoin = (): boolean => {
         const { socket: s } = useOnlineStore.getState();
         if (!s?.connected || joinScheduled) return !!joinScheduled;
+        console.log('📡 Socket connected, scheduling join');
         joinScheduled = true;
         setTimeout(() => {
           const { status: st } = useOnlineStore.getState();
           if (st !== 'in_game') {
+            console.log('🎯 Joining queue');
             s.emit('join_queue', { mode: qmode, userId, username, boardSize });
             useOnlineStore.setState({ status: 'searching' });
           }
@@ -205,13 +219,17 @@ export default function Game() {
 
       if (!scheduleJoin()) {
         const iv = setInterval(() => {
-          if (scheduleJoin()) clearInterval(iv);
+          if (scheduleJoin()) {
+            console.log('✅ Join scheduled, clearing interval');
+            clearInterval(iv);
+          }
         }, 100);
         setTimeout(() => clearInterval(iv), 10_000);
       }
     }
 
     return () => {
+      console.log('🧹 Cleanup on unmount');
       if (mode === 'online') {
         const { status: s } = useOnlineStore.getState();
         if (s === 'searching') leaveQueue();
@@ -219,6 +237,11 @@ export default function Game() {
       fullCleanup();
     };
   }, [userId]);
+
+  // ── Log state changes for debugging ──────────────────────────────────────
+  useEffect(() => {
+    console.log('📊 Current status:', status, 'gameId:', useOnlineStore.getState().gameId);
+  }, [status]);
 
   // ── Save online session ──────────────────────────────────────────────────
   useEffect(() => {
@@ -360,6 +383,7 @@ export default function Game() {
     if (mode !== 'online') return;
 
     const handleRematchOffer = (event: CustomEvent<{ by: string }>) => {
+      console.log('💬 Rematch offered:', event.detail);
       if (isUnmounting.current) return;
       const from = event.detail?.by || 'Opponent';
       const opponentName = opponent?.username || from;
@@ -367,6 +391,7 @@ export default function Game() {
     };
 
     const handleRematchStarted = () => {
+      console.log('🔄 Rematch started');
       setRematchOffer(null);
       setIsWaitingForRematchResponse(false);
     };
@@ -391,6 +416,7 @@ export default function Game() {
     );
   }
 
+  // ── Render ─────────────────────────────────────────────────────────────────
   return (
     <Layout>
       {effectiveWinner && <Confetti />}
@@ -531,13 +557,14 @@ export default function Game() {
           </div>
         )}
 
-        {/* End-game buttons */}
+        {/* ── END-GAME BUTTONS ── */}
         {effectiveWinner && (
           <div className="mt-10 flex gap-4 animate-in fade-in slide-in-from-bottom-4 relative z-10 flex-wrap justify-center">
             {/* Rematch button - only for online mode */}
             {mode === 'online' && (
               <button
                 onClick={() => {
+                  console.log('🔄 Request Rematch clicked');
                   setIsWaitingForRematchResponse(true);
                   requestRematch();
                 }}
@@ -550,9 +577,10 @@ export default function Game() {
               </button>
             )}
 
+            {/* Find New Match / Play Again */}
             <button
               onClick={() => {
-                // Force reset before navigating
+                console.log('🔍 Find New Match clicked');
                 forceResetOnlineState();
                 navigateWithCleanup('/play');
               }}
@@ -561,8 +589,10 @@ export default function Game() {
               {mode === 'online' ? 'Find New Match' : 'Play Again'}
             </button>
 
+            {/* Exit */}
             <button
               onClick={() => {
+                console.log('🚪 Exit clicked');
                 forceResetOnlineState();
                 navigateWithCleanup('/');
               }}
@@ -573,13 +603,16 @@ export default function Game() {
           </div>
         )}
 
-        {/* Resign & Exit buttons - visible during game for all modes */}
+        {/* ── RESIGN & EXIT DURING GAME ── */}
         {!effectiveWinner && (
           <div className="mt-8 flex gap-4 relative z-10">
             {/* Resign button - show for AI and Online modes only */}
             {mode !== 'local' && (
               <button
-                onClick={() => setShowResignConfirm(true)}
+                onClick={() => {
+                  console.log('🏳️ Resign button clicked');
+                  setShowResignConfirm(true);
+                }}
                 className="text-xs text-red-400 hover:text-red-300 transition-colors underline underline-offset-2"
               >
                 Resign
@@ -588,7 +621,10 @@ export default function Game() {
 
             {/* Exit button for all modes */}
             <button
-              onClick={() => setShowExitConfirm(true)}
+              onClick={() => {
+                console.log('🚪 Exit Game button clicked');
+                setShowExitConfirm(true);
+              }}
               className="text-xs text-muted-foreground hover:text-foreground transition-colors underline underline-offset-2"
             >
               Exit Game
@@ -597,7 +633,7 @@ export default function Game() {
         )}
       </div>
 
-      {/* Resign confirmation dialog */}
+      {/* ── RESIGN CONFIRMATION ── */}
       {showResignConfirm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
           <div className="bg-card border border-border rounded-2xl shadow-2xl max-w-sm w-full p-6">
@@ -625,7 +661,7 @@ export default function Game() {
         </div>
       )}
 
-      {/* Exit confirmation dialog */}
+      {/* ── EXIT CONFIRMATION ── */}
       {showExitConfirm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
           <div className="bg-card border border-border rounded-2xl shadow-2xl max-w-sm w-full p-6">
@@ -638,6 +674,7 @@ export default function Game() {
             <div className="flex gap-3">
               <button
                 onClick={() => {
+                  console.log('✅ Exit confirmed');
                   forceResetOnlineState();
                   navigateWithCleanup('/');
                 }}
@@ -658,16 +695,18 @@ export default function Game() {
 
       <RulesModal open={rulesOpen} onClose={() => setRulesOpen(false)} />
 
-      {/* Rematch Modal */}
+      {/* ── REMATCH MODAL ── */}
       <RematchModal
         open={!!rematchOffer}
         opponentName={rematchOffer?.from || 'Opponent'}
         isWaiting={isWaitingForRematch}
         onAccept={() => {
+          console.log('✅ Rematch accepted');
           requestRematch();
           setRematchOffer(null);
         }}
         onDecline={() => {
+          console.log('❌ Rematch declined');
           declineRematch();
           setRematchOffer(null);
           setIsWaitingForRematchResponse(false);
