@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useOnlineStore } from '../../store/onlineStore';
+import { useAuthStore } from '../../store/authStore';
+import { BoardSize } from '../../lib/gameLogic';
 
 const TIMEOUT_SECS = 10;
 
@@ -8,12 +10,13 @@ interface MatchmakingProps {
 }
 
 export function Matchmaking({ boardSize = 3 }: MatchmakingProps) {
-  const { status, leaveQueue, onlineCounts } = useOnlineStore();
+  const { status, leaveQueue, onlineCounts, joinQueue } = useOnlineStore();
+  const { userId, username } = useAuthStore();
 
   const [countdown, setCountdown] = useState(TIMEOUT_SECS);
   const [phase, setPhase] = useState<'searching' | 'no_players' | 'connecting_ai'>('searching');
 
-  // Stable refs so interval closure never goes stale
+  // Stable refs
   const boardSizeRef = useRef(boardSize);
   boardSizeRef.current = boardSize;
   const leaveQueueRef = useRef(leaveQueue);
@@ -21,8 +24,16 @@ export function Matchmaking({ boardSize = 3 }: MatchmakingProps) {
   const phaseRef = useRef(phase);
   phaseRef.current = phase;
 
-  // ── Single effect: countdown + AI fallback, runs once on mount ──────────
+  // ── Join queue on mount with correct board size ──────────────────────────
   useEffect(() => {
+    console.log('🎯 Matchmaking mounted with boardSize:', boardSize);
+    
+    if (userId && username) {
+      console.log('📤 Joining queue with boardSize:', boardSize);
+      joinQueue('casual', userId, username, boardSize as BoardSize);
+    }
+
+    // ── Countdown timer ────────────────────────────────────────────────────
     let remaining = TIMEOUT_SECS;
 
     const tick = setInterval(() => {
@@ -32,7 +43,6 @@ export function Matchmaking({ boardSize = 3 }: MatchmakingProps) {
       if (remaining <= 0) {
         clearInterval(tick);
 
-        // Guard: if already matched (phase changed externally), do nothing
         if (phaseRef.current !== 'searching') return;
 
         leaveQueueRef.current();
@@ -41,8 +51,6 @@ export function Matchmaking({ boardSize = 3 }: MatchmakingProps) {
         setTimeout(() => setPhase('connecting_ai'), 1400);
 
         setTimeout(() => {
-          // window.location.href for a hard navigation — avoids any wouter
-          // state timing issues that could swallow a soft setLocation() call
           const base = import.meta.env.BASE_URL.replace(/\/$/, '');
           window.location.href = `${base}/game?mode=ai&difficulty=expert&boardSize=${boardSizeRef.current}`;
         }, 3200);
@@ -50,17 +58,24 @@ export function Matchmaking({ boardSize = 3 }: MatchmakingProps) {
     }, 1000);
 
     return () => clearInterval(tick);
-  }, []); // runs exactly once on mount
+  }, []); // runs once on mount
 
-  const total    = onlineCounts?.total ?? null;
-  const playing  = onlineCounts?.playing  ?? {};
+  // ── Also try to join if userId becomes available later ──────────────────
+  useEffect(() => {
+    if (userId && username) {
+      console.log('🔄 User ready, joining queue with boardSize:', boardSize);
+      joinQueue('casual', userId, username, boardSize as BoardSize);
+    }
+  }, [userId, username]);
+
+  const total = onlineCounts?.total ?? null;
+  const playing = onlineCounts?.playing ?? {};
   const searching = onlineCounts?.searching ?? {};
-  const sizes    = [3, 4, 5] as const;
+  const sizes = [3, 4, 5] as const;
   const isSearching = phase === 'searching';
 
   return (
     <div className="flex flex-col items-center justify-center min-h-[420px] w-full max-w-sm mx-auto px-4">
-
       {/* Pulse ring */}
       <div className="relative flex items-center justify-center w-32 h-32 mb-7">
         {phase === 'searching' && (
@@ -86,7 +101,7 @@ export function Matchmaking({ boardSize = 3 }: MatchmakingProps) {
       </div>
 
       {/* Status heading */}
-      {phase === 'searching'    && <h3 className="text-xl font-semibold tracking-tight mb-2">{status === 'connecting' ? 'Connecting...' : 'Searching for opponent...'}</h3>}
+      {phase === 'searching'    && <h3 className="text-xl font-semibold tracking-tight mb-2">{status === 'connecting' ? 'Connecting...' : `Searching for opponent (${boardSize}×${boardSize})...`}</h3>}
       {phase === 'no_players'   && <h3 className="text-xl font-semibold tracking-tight text-yellow-400 mb-2">No players found.</h3>}
       {phase === 'connecting_ai'&& <h3 className="text-xl font-semibold tracking-tight text-emerald-400 mb-2">Connecting with AI Expert...</h3>}
 
@@ -142,7 +157,7 @@ export function Matchmaking({ boardSize = 3 }: MatchmakingProps) {
             const play = playing[size]   ?? 0;
             const wait = searching[size] ?? 0;
             return (
-              <div key={size} className="bg-muted/40 rounded-lg px-3 py-2.5 text-center">
+              <div key={size} className={`bg-muted/40 rounded-lg px-3 py-2.5 text-center ${size === boardSize ? 'ring-1 ring-primary/50' : ''}`}>
                 <p className="text-xs text-muted-foreground font-medium mb-1.5">{size}×{size}</p>
                 <div className="space-y-1">
                   <div className="flex items-center justify-between text-xs">
