@@ -65,23 +65,36 @@ export default function Game() {
   const [rulesOpen, setRulesOpen] = useState(false);
   const [showResignConfirm, setShowResignConfirm] = useState(false);
   const [showExitConfirm, setShowExitConfirm] = useState(false);
+  const [isCleaningUp, setIsCleaningUp] = useState(false);
+  const [isReconnecting, setIsReconnecting] = useState(false);
 
   const aiPending = useRef(false);
   const initialized = useRef(false);
   const isUnmounting = useRef(false);
+  const gameIdRef = useRef<string | null>(null);
+  const reconnectionAttempted = useRef(false);
 
   // ── Get the store's set function directly ────────────────────────────────
   const onlineStoreSet = useOnlineStore.setState;
 
-  // ── FORCE RESET - Direct store update ─────────────────────────────────────
+  // ── FORCE RESET - Complete nuclear option ─────────────────────────────────
   const forceResetOnlineState = () => {
     console.log('🔥 forceResetOnlineState called');
+    setIsCleaningUp(true);
     
     // 1. Clear session storage
     clearOnlineSession();
     console.log('✅ Session cleared');
 
-    // 2. Force reset online store state using the store's set function
+    // 2. Get current socket and disconnect
+    const { socket: s, gameId } = useOnlineStore.getState();
+    if (s?.connected) {
+      s.removeAllListeners();
+      s.disconnect();
+      console.log('✅ Socket disconnected and listeners removed');
+    }
+
+    // 3. Force reset online store state
     onlineStoreSet({
       status: 'disconnected',
       gameId: null,
@@ -95,23 +108,24 @@ export default function Game() {
     });
     console.log('✅ Online store reset');
 
-    // 3. Disconnect socket
-    const { socket: s } = useOnlineStore.getState();
-    if (s?.connected) {
-      s.disconnect();
-      console.log('✅ Socket disconnected');
-    }
-
     // 4. Reset game store
     resetGame('local', 'medium', 3);
     console.log('✅ Game store reset');
+
+    // 5. Clear refs
+    gameIdRef.current = null;
+    reconnectionAttempted.current = false;
+
+    setTimeout(() => {
+      setIsCleaningUp(false);
+    }, 200);
   };
 
   // ── Complete cleanup ──────────────────────────────────────────────────────
   const fullCleanup = () => {
     console.log('🧹 fullCleanup called');
-    if (isUnmounting.current) {
-      console.log('⚠️ Already unmounting, skipping');
+    if (isUnmounting.current || isCleaningUp) {
+      console.log('⚠️ Already cleaning up, skipping');
       return;
     }
     isUnmounting.current = true;
@@ -130,7 +144,7 @@ export default function Game() {
 
     setTimeout(() => {
       isUnmounting.current = false;
-    }, 100);
+    }, 200);
   };
 
   // ── Navigate with cleanup ────────────────────────────────────────────────
@@ -139,8 +153,8 @@ export default function Game() {
     fullCleanup();
     setTimeout(() => {
       console.log(`📍 Setting location to ${path}`);
-      setLocation(path);
-    }, 150);
+      window.location.href = path;
+    }, 200);
   };
 
   // ── Resign handler ────────────────────────────────────────────────────────
@@ -153,25 +167,96 @@ export default function Game() {
       if (currentGameId && socket?.connected) {
         console.log('📤 Sending resign event');
         socket.emit('resign', { gameId: currentGameId, playerNumber: playerNum });
-        // Give the server a moment to process
-        setTimeout(() => {
-          forceResetOnlineState();
-          navigateWithCleanup('/play');
-        }, 300);
-        setShowResignConfirm(false);
-        return;
       }
     }
     
     setShowResignConfirm(false);
-    console.log('🔄 Resigning and navigating to /play');
-    navigateWithCleanup('/play');
+    setTimeout(() => {
+      navigateWithCleanup('/play');
+    }, 300);
+  };
+
+  // ── Attempt to reconnect to existing game ───────────────────────────────
+  const attemptReconnection = (userId: string, username: string) => {
+    if (reconnectionAttempted.current) return;
+    reconnectionAttempted.current = true;
+
+    const saved = loadOnlineSession();
+    console.log('💾 Saved session:', saved);
+
+    if (saved && saved.userId === userId && saved.gameId) {
+      console.log('🔄 Found saved game, attempting to reconnect:', saved.gameId);
+      setIsReconnecting(true);
+      
+      // Wait for socket to be ready
+      const checkSocket = setInterval(() => {
+        const { socket: s, status: st } = useOnlineStore.getState();
+        if (s?.connected) {
+          clearInterval(checkSocket);
+          console.log('📡 Socket ready, rejoining game:', saved.gameId);
+          s.emit('rejoin_game', { 
+            gameId: saved.gameId, 
+            userId: saved.userId, 
+            username: saved.username 
+          });
+          
+          // Update store with reconnection info
+          onlineStoreSet({
+            status: 'connecting',
+            gameId: saved.gameId,
+            playerNum: saved.playerNum,
+            opponent: saved.opponent,
+          });
+          
+          setTimeout(() => {
+            setIsReconnecting(false);
+          }, 3000);
+        }
+      }, 500);
+
+      // Timeout after 5 seconds
+      setTimeout(() => {
+        clearInterval(checkSocket);
+        setIsReconnecting(false);
+        if (!useOnlineStore.getState().gameState) {
+          console.log('⏰ Reconnection timeout, joining queue');
+          joinQueue();
+        }
+      }, 5000);
+    } else {
+      console.log('ℹ️ No saved session found, joining queue');
+      joinQueue();
+    }
+  };
+
+  // ── Join queue ────────────────────────────────────────────────────────────
+  const joinQueue = () => {
+    const { socket: s, status: st } = useOnlineStore.getState();
+    if (!s?.connected) {
+      console.log('⏳ Socket not connected, waiting...');
+      return;
+    }
+    if (st === 'in_game') {
+      console.log('⚠️ Already in game, not joining queue');
+      return;
+    }
+    
+    console.log('🎯 Joining queue');
+    s.emit('join_queue', { 
+      mode: qmode, 
+      userId, 
+      username: me?.username ?? 'Player', 
+      boardSize 
+    });
+    onlineStoreSet({ status: 'searching' });
   };
 
   // ── Init ─────────────────────────────────────────────────────────────────
   useEffect(() => {
     console.log('📌 Game init effect, mode:', mode, 'userId:', userId);
     isUnmounting.current = false;
+    setIsCleaningUp(false);
+    reconnectionAttempted.current = false;
 
     if (mode === 'local' || mode === 'ai') {
       if (initialized.current) {
@@ -208,34 +293,14 @@ export default function Game() {
 
       const username = me?.username ?? 'Player';
       console.log('👤 Connecting user:', userId, username);
+      
+      // Connect with a fresh socket
       connect(userId, username, token ?? '');
 
-      let joinScheduled = false;
-      const scheduleJoin = (): boolean => {
-        const { socket: s } = useOnlineStore.getState();
-        if (!s?.connected || joinScheduled) return !!joinScheduled;
-        console.log('📡 Socket connected, scheduling join');
-        joinScheduled = true;
-        setTimeout(() => {
-          const { status: st } = useOnlineStore.getState();
-          if (st !== 'in_game') {
-            console.log('🎯 Joining queue');
-            s.emit('join_queue', { mode: qmode, userId, username, boardSize });
-            onlineStoreSet({ status: 'searching' });
-          }
-        }, 350);
-        return true;
-      };
-
-      if (!scheduleJoin()) {
-        const iv = setInterval(() => {
-          if (scheduleJoin()) {
-            console.log('✅ Join scheduled, clearing interval');
-            clearInterval(iv);
-          }
-        }, 100);
-        setTimeout(() => clearInterval(iv), 10_000);
-      }
+      // Try to reconnect to existing game after connection
+      setTimeout(() => {
+        attemptReconnection(userId, username);
+      }, 1000);
     }
 
     return () => {
@@ -248,16 +313,21 @@ export default function Game() {
     };
   }, [userId]);
 
-  // ── Log state changes for debugging ──────────────────────────────────────
+  // ── Track game ID changes ───────────────────────────────────────────────
   useEffect(() => {
-    console.log('📊 Current status:', status, 'gameId:', useOnlineStore.getState().gameId);
-  }, [status]);
+    const currentGameId = useOnlineStore.getState().gameId;
+    if (currentGameId && currentGameId !== gameIdRef.current) {
+      console.log('🎮 Game ID changed:', currentGameId);
+      gameIdRef.current = currentGameId;
+    }
+  }, [gameState]);
 
   // ── Save online session ──────────────────────────────────────────────────
   useEffect(() => {
     if (mode === 'online' && status === 'in_game' && playerNum && opponent && userId) {
       const { gameId } = useOnlineStore.getState();
-      if (gameId) {
+      if (gameId && !isCleaningUp && !isReconnecting) {
+        console.log('💾 Saving session for game:', gameId);
         saveOnlineSession({
           gameId,
           playerNum,
@@ -276,13 +346,13 @@ export default function Game() {
     if (mode !== 'ai') return;
     if (currentPlayer !== 2 || winner) return;
     if (aiPending.current) return;
-    if (isUnmounting.current) return;
+    if (isUnmounting.current || isCleaningUp) return;
 
     aiPending.current = true;
     const thinkMs = 350 + Math.random() * 400;
 
     const timerId = setTimeout(() => {
-      if (isUnmounting.current) {
+      if (isUnmounting.current || isCleaningUp) {
         aiPending.current = false;
         return;
       }
@@ -355,7 +425,7 @@ export default function Game() {
   // ── Online click handler ─────────────────────────────────────────────────
   const handleOnlineCellClick = (pos: number) => {
     if (!gameState || gameState.currentPlayer !== playerNum || gameState.winner) return;
-    if (isUnmounting.current) return;
+    if (isUnmounting.current || isCleaningUp || isReconnecting) return;
 
     if (gameState.phase === 'placement') {
       if (gameState.board[pos] === null) makeMove(null, pos);
@@ -394,7 +464,7 @@ export default function Game() {
 
     const handleRematchOffer = (event: CustomEvent<{ by: string }>) => {
       console.log('💬 Rematch offered:', event.detail);
-      if (isUnmounting.current) return;
+      if (isUnmounting.current || isCleaningUp) return;
       const from = event.detail?.by || 'Opponent';
       const opponentName = opponent?.username || from;
       setRematchOffer({ from: opponentName });
@@ -416,11 +486,29 @@ export default function Game() {
   }, [mode, opponent?.username]);
 
   // ── Matchmaking screen ────────────────────────────────────────────────────
-  if (mode === 'online' && status !== 'in_game') {
+  if (mode === 'online' && status !== 'in_game' && !isCleaningUp && !isReconnecting) {
     return (
       <Layout>
         <div className="flex-1 flex items-center justify-center">
           <Matchmaking boardSize={boardSize} />
+        </div>
+      </Layout>
+    );
+  }
+
+  // ── Reconnecting screen ──────────────────────────────────────────────────
+  if (isReconnecting) {
+    return (
+      <Layout>
+        <div className="flex-1 flex items-center justify-center">
+          <div className="text-center">
+            <div className="w-16 h-16 mx-auto mb-4 relative">
+              <div className="absolute inset-0 rounded-full border-4 border-primary/20" />
+              <div className="absolute inset-0 rounded-full border-4 border-t-primary animate-spin" />
+            </div>
+            <h3 className="text-xl font-semibold mb-2">Reconnecting to game...</h3>
+            <p className="text-sm text-muted-foreground">Please wait while we restore your game.</p>
+          </div>
         </div>
       </Layout>
     );
@@ -591,12 +679,7 @@ export default function Game() {
             <button
               onClick={() => {
                 console.log('🔍 Find New Match clicked');
-                // Force reset immediately
-                forceResetOnlineState();
-                // Navigate after a brief delay
-                setTimeout(() => {
-                  setLocation('/play');
-                }, 100);
+                navigateWithCleanup('/play');
               }}
               className="bg-primary text-primary-foreground px-8 py-3 rounded-lg font-medium hover:bg-primary/90 transition-colors"
             >
@@ -607,12 +690,7 @@ export default function Game() {
             <button
               onClick={() => {
                 console.log('🚪 Exit clicked');
-                // Force reset immediately
-                forceResetOnlineState();
-                // Navigate after a brief delay
-                setTimeout(() => {
-                  setLocation('/');
-                }, 100);
+                navigateWithCleanup('/');
               }}
               className="bg-secondary text-secondary-foreground px-8 py-3 rounded-lg font-medium hover:bg-secondary/80 transition-colors"
             >
@@ -693,10 +771,7 @@ export default function Game() {
               <button
                 onClick={() => {
                   console.log('✅ Exit confirmed');
-                  forceResetOnlineState();
-                  setTimeout(() => {
-                    setLocation('/');
-                  }, 100);
+                  navigateWithCleanup('/');
                 }}
                 className="flex-1 bg-red-500 hover:bg-red-600 text-white font-semibold py-3 rounded-lg transition-colors"
               >
@@ -730,10 +805,7 @@ export default function Game() {
           declineRematch();
           setRematchOffer(null);
           setIsWaitingForRematchResponse(false);
-          forceResetOnlineState();
-          setTimeout(() => {
-            setLocation('/play');
-          }, 100);
+          navigateWithCleanup('/play');
         }}
       />
     </Layout>
