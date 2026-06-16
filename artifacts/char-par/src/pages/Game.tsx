@@ -70,7 +70,10 @@ export default function Game() {
   const initialized = useRef(false);
   const isUnmounting = useRef(false);
 
-  // ── FORCE RESET - The nuclear option ──────────────────────────────────────
+  // ── Get the store's set function directly ────────────────────────────────
+  const onlineStoreSet = useOnlineStore.setState;
+
+  // ── FORCE RESET - Direct store update ─────────────────────────────────────
   const forceResetOnlineState = () => {
     console.log('🔥 forceResetOnlineState called');
     
@@ -78,8 +81,8 @@ export default function Game() {
     clearOnlineSession();
     console.log('✅ Session cleared');
 
-    // 2. Force reset online store state
-    useOnlineStore.setState({
+    // 2. Force reset online store state using the store's set function
+    onlineStoreSet({
       status: 'disconnected',
       gameId: null,
       playerNum: null,
@@ -137,7 +140,7 @@ export default function Game() {
     setTimeout(() => {
       console.log(`📍 Setting location to ${path}`);
       setLocation(path);
-    }, 100);
+    }, 150);
   };
 
   // ── Resign handler ────────────────────────────────────────────────────────
@@ -150,6 +153,13 @@ export default function Game() {
       if (currentGameId && socket?.connected) {
         console.log('📤 Sending resign event');
         socket.emit('resign', { gameId: currentGameId, playerNumber: playerNum });
+        // Give the server a moment to process
+        setTimeout(() => {
+          forceResetOnlineState();
+          navigateWithCleanup('/play');
+        }, 300);
+        setShowResignConfirm(false);
+        return;
       }
     }
     
@@ -211,7 +221,7 @@ export default function Game() {
           if (st !== 'in_game') {
             console.log('🎯 Joining queue');
             s.emit('join_queue', { mode: qmode, userId, username, boardSize });
-            useOnlineStore.setState({ status: 'searching' });
+            onlineStoreSet({ status: 'searching' });
           }
         }, 350);
         return true;
@@ -581,8 +591,12 @@ export default function Game() {
             <button
               onClick={() => {
                 console.log('🔍 Find New Match clicked');
+                // Force reset immediately
                 forceResetOnlineState();
-                navigateWithCleanup('/play');
+                // Navigate after a brief delay
+                setTimeout(() => {
+                  setLocation('/play');
+                }, 100);
               }}
               className="bg-primary text-primary-foreground px-8 py-3 rounded-lg font-medium hover:bg-primary/90 transition-colors"
             >
@@ -593,8 +607,12 @@ export default function Game() {
             <button
               onClick={() => {
                 console.log('🚪 Exit clicked');
+                // Force reset immediately
                 forceResetOnlineState();
-                navigateWithCleanup('/');
+                // Navigate after a brief delay
+                setTimeout(() => {
+                  setLocation('/');
+                }, 100);
               }}
               className="bg-secondary text-secondary-foreground px-8 py-3 rounded-lg font-medium hover:bg-secondary/80 transition-colors"
             >
@@ -676,7 +694,9 @@ export default function Game() {
                 onClick={() => {
                   console.log('✅ Exit confirmed');
                   forceResetOnlineState();
-                  navigateWithCleanup('/');
+                  setTimeout(() => {
+                    setLocation('/');
+                  }, 100);
                 }}
                 className="flex-1 bg-red-500 hover:bg-red-600 text-white font-semibold py-3 rounded-lg transition-colors"
               >
@@ -711,7 +731,9 @@ export default function Game() {
           setRematchOffer(null);
           setIsWaitingForRematchResponse(false);
           forceResetOnlineState();
-          navigateWithCleanup('/play');
+          setTimeout(() => {
+            setLocation('/play');
+          }, 100);
         }}
       />
     </Layout>
