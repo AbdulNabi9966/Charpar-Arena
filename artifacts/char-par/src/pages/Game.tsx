@@ -17,42 +17,139 @@ import { soundSystem } from '../lib/audio';
 export default function Game() {
   const [, setLocation] = useLocation();
   const searchParams = new URLSearchParams(window.location.search);
-  const mode       = searchParams.get('mode') || 'local';
+  const mode = searchParams.get('mode') || 'local';
   const difficulty = (searchParams.get('difficulty') || 'medium') as 'easy' | 'medium' | 'hard' | 'expert';
-  const qmode      = (searchParams.get('qmode') || 'casual') as 'casual' | 'ranked';
-  const rawSize    = parseInt(searchParams.get('boardSize') || '3', 10);
-  const boardSize  = ([3, 4, 5].includes(rawSize) ? rawSize : 3) as BoardSize;
+  const qmode = (searchParams.get('qmode') || 'casual') as 'casual' | 'ranked';
+  const rawSize = parseInt(searchParams.get('boardSize') || '3', 10);
+  const boardSize = ([3, 4, 5].includes(rawSize) ? rawSize : 3) as BoardSize;
 
   const {
-    board, phase, currentPlayer, winner, winLine,
-    resetGame, placePiece, selectPiece, movePiece, moveAIPiece,
-    gameMode, aiDifficulty, piecesPlaced, boardSize: storedBoardSize,
+    board,
+    phase,
+    currentPlayer,
+    winner,
+    winLine,
+    resetGame,
+    placePiece,
+    selectPiece,
+    movePiece,
+    moveAIPiece,
+    gameMode,
+    aiDifficulty,
+    piecesPlaced,
+    boardSize: storedBoardSize,
   } = useGameStore();
 
   const { token, userId } = useAuthStore();
   const { data: me } = useGetMe({ query: { enabled: !!token, queryKey: ['auth', 'me'] } });
   const {
-    status, connect, disconnect, makeMove, playerNum,
-    gameState, opponent, leaveQueue, onlineSelected, setOnlineSelected, winReason,
-    requestRematch, declineRematch, isWaitingForRematch,
+    status,
+    connect,
+    disconnect,
+    makeMove,
+    playerNum,
+    gameState,
+    opponent,
+    leaveQueue,
+    onlineSelected,
+    setOnlineSelected,
+    winReason,
+    requestRematch,
+    declineRematch,
+    isWaitingForRematch,
+    socket,
   } = useOnlineStore();
 
   const [rematchOffer, setRematchOffer] = useState<{ from: string } | null>(null);
   const [isWaitingForRematchResponse, setIsWaitingForRematchResponse] = useState(false);
   const [rulesOpen, setRulesOpen] = useState(false);
+  const [showResignConfirm, setShowResignConfirm] = useState(false);
+  const [showExitConfirm, setShowExitConfirm] = useState(false);
 
-  const aiPending   = useRef(false);
+  const aiPending = useRef(false);
   const initialized = useRef(false);
+  const isUnmounting = useRef(false);
+
+  // ── Complete cleanup function ────────────────────────────────────────────
+  const fullCleanup = () => {
+    // Prevent multiple cleanups
+    if (isUnmounting.current) return;
+    isUnmounting.current = true;
+
+    // 1. Clear online session storage
+    clearOnlineSession();
+
+    // 2. Disconnect socket and leave queues
+    if (mode === 'online') {
+      // Leave queue if searching
+      if (status === 'searching') {
+        leaveQueue();
+      }
+      // Disconnect socket
+      disconnect();
+    }
+
+    // 3. Reset game store to clean state
+    resetGame('local', 'medium', 3);
+
+    // 4. Reset all local states
+    setRematchOffer(null);
+    setIsWaitingForRematchResponse(false);
+    setShowResignConfirm(false);
+    setShowExitConfirm(false);
+
+    // 5. Reset AI pending flag
+    aiPending.current = false;
+
+    // 6. Reset initialization flag so game can re-initialize
+    initialized.current = false;
+
+    // 7. Allow future cleanups
+    setTimeout(() => {
+      isUnmounting.current = false;
+    }, 100);
+  };
+
+  // ── Safe navigation with cleanup ─────────────────────────────────────────
+  const navigateWithCleanup = (path: string) => {
+    fullCleanup();
+    // Use setTimeout to ensure state updates are processed
+    setTimeout(() => {
+      setLocation(path);
+    }, 50);
+  };
+
+  // ── Resign handler ────────────────────────────────────────────────────────
+  const handleResign = () => {
+    if (mode === 'online') {
+      // Online: send resign to server
+      const currentGameId = useOnlineStore.getState().gameId;
+      if (currentGameId && socket?.connected) {
+        socket.emit('resign', { gameId: currentGameId, playerNumber: playerNum });
+      }
+      // Cleanup and navigate
+      fullCleanup();
+      setTimeout(() => setLocation('/play'), 100);
+    } else {
+      // Local / AI: just reset and go to play page
+      fullCleanup();
+      setTimeout(() => setLocation('/play'), 100);
+    }
+    setShowResignConfirm(false);
+  };
 
   // ── Init ─────────────────────────────────────────────────────────────────
   useEffect(() => {
+    // Reset unmount flag on mount
+    isUnmounting.current = false;
+
     if (mode === 'local' || mode === 'ai') {
       if (initialized.current) return;
       initialized.current = true;
       const shouldRestore =
         storedBoardSize === boardSize &&
         ((mode === 'local' && gameMode === 'local') ||
-         (mode === 'ai' && gameMode === 'ai' && aiDifficulty === difficulty));
+          (mode === 'ai' && gameMode === 'ai' && aiDifficulty === difficulty));
       if (!shouldRestore) {
         resetGame(mode as 'local' | 'ai', difficulty, boardSize);
       }
@@ -73,13 +170,13 @@ export default function Game() {
 
       let joinScheduled = false;
       const scheduleJoin = (): boolean => {
-        const { socket } = useOnlineStore.getState();
-        if (!socket?.connected || joinScheduled) return !!joinScheduled;
+        const { socket: s } = useOnlineStore.getState();
+        if (!s?.connected || joinScheduled) return !!joinScheduled;
         joinScheduled = true;
         setTimeout(() => {
-          const { status: s } = useOnlineStore.getState();
-          if (s !== 'in_game') {
-            socket.emit('join_queue', { mode: qmode, userId, username, boardSize });
+          const { status: st } = useOnlineStore.getState();
+          if (st !== 'in_game') {
+            s.emit('join_queue', { mode: qmode, userId, username, boardSize });
             useOnlineStore.setState({ status: 'searching' });
           }
         }, 350);
@@ -87,16 +184,20 @@ export default function Game() {
       };
 
       if (!scheduleJoin()) {
-        const iv = setInterval(() => { if (scheduleJoin()) clearInterval(iv); }, 100);
+        const iv = setInterval(() => {
+          if (scheduleJoin()) clearInterval(iv);
+        }, 100);
         setTimeout(() => clearInterval(iv), 10_000);
       }
     }
 
     return () => {
+      // Cleanup on unmount
       if (mode === 'online') {
         const { status: s } = useOnlineStore.getState();
         if (s === 'searching') leaveQueue();
       }
+      fullCleanup();
     };
   }, [userId]);
 
@@ -105,44 +206,71 @@ export default function Game() {
     if (mode === 'online' && status === 'in_game' && playerNum && opponent && userId) {
       const { gameId } = useOnlineStore.getState();
       if (gameId) {
-        saveOnlineSession({ gameId, playerNum, opponent, qmode, userId,
-          username: opponent.username, boardSize: gameState?.boardSize ?? boardSize });
+        saveOnlineSession({
+          gameId,
+          playerNum,
+          opponent,
+          qmode,
+          userId,
+          username: opponent.username,
+          boardSize: gameState?.boardSize ?? boardSize,
+        });
       }
     }
   }, [mode, status, playerNum, opponent, userId, qmode, boardSize, gameState?.boardSize]);
-
-  // ── Clear session on game end ────────────────────────────────────────────
-  useEffect(() => {
-    if (mode === 'online' && gameState?.winner) clearOnlineSession();
-  }, [mode, gameState?.winner]);
 
   // ── AI turn ──────────────────────────────────────────────────────────────
   useEffect(() => {
     if (mode !== 'ai') return;
     if (currentPlayer !== 2 || winner) return;
     if (aiPending.current) return;
+    if (isUnmounting.current) return;
 
     aiPending.current = true;
     const thinkMs = 350 + Math.random() * 400;
 
     const timerId = setTimeout(() => {
+      if (isUnmounting.current) {
+        aiPending.current = false;
+        return;
+      }
+
       const fresh = useGameStore.getState();
-      if (fresh.currentPlayer !== 2 || fresh.winner) { aiPending.current = false; return; }
+      if (fresh.currentPlayer !== 2 || fresh.winner) {
+        aiPending.current = false;
+        return;
+      }
 
       const move = getAIMove(
-        fresh.board, difficulty, fresh.phase, fresh.piecesPlaced, fresh.boardSize,
+        fresh.board,
+        difficulty,
+        fresh.phase,
+        fresh.piecesPlaced,
+        fresh.boardSize,
       );
 
-      if (!move) { aiPending.current = false; return; }
+      if (!move) {
+        aiPending.current = false;
+        return;
+      }
 
       if (fresh.phase === 'placement') {
-        if (fresh.board[move.to] !== null) { aiPending.current = false; return; }
+        if (fresh.board[move.to] !== null) {
+          aiPending.current = false;
+          return;
+        }
         soundSystem.playPlace();
         fresh.placePiece(move.to);
       } else {
-        if (move.from === null || fresh.board[move.from] !== 2) { aiPending.current = false; return; }
+        if (move.from === null || fresh.board[move.from] !== 2) {
+          aiPending.current = false;
+          return;
+        }
         const valid = getValidMoves(fresh.board, move.from, fresh.boardSize);
-        if (!valid.includes(move.to)) { aiPending.current = false; return; }
+        if (!valid.includes(move.to)) {
+          aiPending.current = false;
+          return;
+        }
         soundSystem.playMove();
         fresh.moveAIPiece(move.from, move.to);
       }
@@ -151,14 +279,17 @@ export default function Game() {
       aiPending.current = false;
     }, thinkMs);
 
-    return () => { clearTimeout(timerId); aiPending.current = false; };
+    return () => {
+      clearTimeout(timerId);
+      aiPending.current = false;
+    };
   }, [currentPlayer, phase, winner, mode, difficulty]);
 
   // ── Derived values ────────────────────────────────────────────────────────
   const effectiveWinner = mode === 'online' ? (gameState?.winner ?? null) : winner;
-  const currentPhase    = mode === 'online' ? gameState?.phase   : phase;
+  const currentPhase = mode === 'online' ? gameState?.phase : phase;
   const onlineBoardSize = gameState?.boardSize ?? boardSize;
-  const isMyTurn        = mode === 'online' ? gameState?.currentPlayer === playerNum : true;
+  const isMyTurn = mode === 'online' ? gameState?.currentPlayer === playerNum : true;
 
   const displayBoard = mode === 'online' && gameState
     ? (gameState.board as (1 | 2 | null)[])
@@ -172,6 +303,7 @@ export default function Game() {
   // ── Online click handler ─────────────────────────────────────────────────
   const handleOnlineCellClick = (pos: number) => {
     if (!gameState || gameState.currentPlayer !== playerNum || gameState.winner) return;
+    if (isUnmounting.current) return;
 
     if (gameState.phase === 'placement') {
       if (gameState.board[pos] === null) makeMove(null, pos);
@@ -193,39 +325,42 @@ export default function Game() {
   // ── Labels ───────────────────────────────────────────────────────────────
   const turnLabel =
     mode === 'ai'
-      ? currentPlayer === 1 ? 'Your Turn' : 'AI thinking…'
-      : mode === 'online'
-      ? gameState?.currentPlayer === playerNum
+      ? currentPlayer === 1
         ? 'Your Turn'
-        : `${opponent?.username ?? 'Opponent'}'s Turn`
-      : `Player ${currentPlayer}'s Turn`;
+        : 'AI thinking…'
+      : mode === 'online'
+        ? gameState?.currentPlayer === playerNum
+          ? 'Your Turn'
+          : `${opponent?.username ?? 'Opponent'}'s Turn`
+        : `Player ${currentPlayer}'s Turn`;
 
   const activeBoardSize = mode === 'online' ? onlineBoardSize : storedBoardSize;
 
   // ── Rematch event listener ──────────────────────────────────────────────
   useEffect(() => {
     if (mode !== 'online') return;
-    
+
     const handleRematchOffer = (event: CustomEvent<{ by: string }>) => {
+      if (isUnmounting.current) return;
       const from = event.detail?.by || 'Opponent';
       const opponentName = opponent?.username || from;
       setRematchOffer({ from: opponentName });
     };
-    
+
     const handleRematchStarted = () => {
       setRematchOffer(null);
       setIsWaitingForRematchResponse(false);
     };
-    
+
     window.addEventListener('rematch-offered', handleRematchOffer as EventListener);
     window.addEventListener('rematch-started', handleRematchStarted as EventListener);
-    
+
     return () => {
       window.removeEventListener('rematch-offered', handleRematchOffer as EventListener);
       window.removeEventListener('rematch-started', handleRematchStarted as EventListener);
     };
   }, [mode, opponent?.username]);
-  
+
   // ── Matchmaking screen ────────────────────────────────────────────────────
   if (mode === 'online' && status !== 'in_game') {
     return (
@@ -242,18 +377,33 @@ export default function Game() {
       {effectiveWinner && <Confetti />}
 
       <div className="flex-1 flex flex-col items-center py-8 px-4">
-
         {/* Online opponent banner */}
         {mode === 'online' && opponent && (
           <div className="mb-5 flex items-center gap-4 text-sm">
-            <span className={`font-semibold ${playerNum === 1 ? 'text-red-400' : 'text-muted-foreground'}`}>
+            <span
+              className={`font-semibold ${playerNum === 1 ? 'text-red-400' : 'text-muted-foreground'}`}
+            >
               You ({playerNum === 1 ? '🔴' : '🔵'})
             </span>
             <span className="text-muted-foreground text-xs uppercase tracking-widest">vs</span>
-            <span className={`font-semibold ${playerNum === 2 ? 'text-red-400' : 'text-blue-400'}`}>
+            <span
+              className={`font-semibold ${playerNum === 2 ? 'text-red-400' : 'text-blue-400'}`}
+            >
               {opponent.username} ({playerNum === 2 ? '🔴' : '🔵'})
             </span>
             <span className="text-xs text-muted-foreground">· {onlineBoardSize}×{onlineBoardSize}</span>
+          </div>
+        )}
+
+        {/* AI opponent banner */}
+        {mode === 'ai' && (
+          <div className="mb-5 flex items-center gap-4 text-sm">
+            <span className="font-semibold text-red-400">You (🔴)</span>
+            <span className="text-muted-foreground text-xs uppercase tracking-widest">vs</span>
+            <span className="font-semibold text-blue-400">
+              AI ({difficulty})
+            </span>
+            <span className="text-xs text-muted-foreground">· {storedBoardSize}×{storedBoardSize}</span>
           </div>
         )}
 
@@ -268,7 +418,9 @@ export default function Game() {
         <div className="mb-6 text-center space-y-1.5 relative z-10">
           <div className="flex items-center justify-center gap-2">
             <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-secondary text-secondary-foreground text-sm font-medium">
-              <span className={`w-1.5 h-1.5 rounded-full ${currentPhase === 'placement' ? 'bg-amber-400' : 'bg-emerald-400'}`} />
+              <span
+                className={`w-1.5 h-1.5 rounded-full ${currentPhase === 'placement' ? 'bg-amber-400' : 'bg-emerald-400'}`}
+              />
               {currentPhase === 'placement' ? 'Placement' : 'Movement'}
             </div>
             <div className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-secondary/60 text-secondary-foreground/70 text-xs">
@@ -287,7 +439,9 @@ export default function Game() {
             {effectiveWinner ? (
               <span className="text-primary">
                 {mode === 'online'
-                  ? effectiveWinner === playerNum ? '🎉 You Win!' : 'You Lose'
+                  ? effectiveWinner === playerNum
+                    ? '🎉 You Win!'
+                    : 'You Lose'
                   : `Player ${effectiveWinner} Wins!`}
               </span>
             ) : (
@@ -297,12 +451,14 @@ export default function Game() {
 
           {/* Resign reason badge */}
           {effectiveWinner && mode === 'online' && winReason === 'resign' && (
-            <div className={[
-              'inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium mt-1',
-              effectiveWinner === playerNum
-                ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30'
-                : 'bg-muted text-muted-foreground border border-border',
-            ].join(' ')}>
+            <div
+              className={[
+                'inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium mt-1',
+                effectiveWinner === playerNum
+                  ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30'
+                  : 'bg-muted text-muted-foreground border border-border',
+              ].join(' ')}
+            >
               <span>🏳️</span>
               {effectiveWinner === playerNum
                 ? `${opponent?.username ?? 'Opponent'} resigned`
@@ -325,11 +481,14 @@ export default function Game() {
         </div>
 
         {/* Board */}
-        <div className={[
-          'relative z-10 w-full max-w-[420px] mx-auto',
-          (!isMyTurn || (mode === 'ai' && currentPlayer === 2)) && !effectiveWinner
-            ? 'pointer-events-none' : '',
-        ].join(' ')}>
+        <div
+          className={[
+            'relative z-10 w-full max-w-[420px] mx-auto',
+            (!isMyTurn || (mode === 'ai' && currentPlayer === 2)) && !effectiveWinner
+              ? 'pointer-events-none'
+              : '',
+          ].join(' ')}
+        >
           <Board
             overrideBoard={displayBoard}
             overrideSelected={mode === 'online' ? onlineSelected : undefined}
@@ -366,37 +525,21 @@ export default function Game() {
                 disabled={isWaitingForRematch || isWaitingForRematchResponse}
                 className="bg-emerald-500 text-white px-8 py-3 rounded-lg font-medium hover:bg-emerald-600 transition-colors disabled:opacity-50"
               >
-                {isWaitingForRematch || isWaitingForRematchResponse 
-                  ? 'Waiting for opponent...' 
+                {isWaitingForRematch || isWaitingForRematchResponse
+                  ? 'Waiting for opponent...'
                   : 'Request Rematch'}
               </button>
             )}
-            
+
             <button
-              onClick={() => {
-                if (mode === 'online') {
-                  disconnect();
-                  clearOnlineSession();
-                  resetGame('online', difficulty, storedBoardSize);
-                } else {
-                  resetGame(mode as 'local' | 'ai', difficulty, storedBoardSize);
-                }
-                setLocation('/play');
-              }}
+              onClick={() => navigateWithCleanup('/play')}
               className="bg-primary text-primary-foreground px-8 py-3 rounded-lg font-medium hover:bg-primary/90 transition-colors"
             >
               {mode === 'online' ? 'Find New Match' : 'Play Again'}
             </button>
-            
+
             <button
-              onClick={() => {
-                if (mode === 'online') {
-                  disconnect();
-                  clearOnlineSession();
-                }
-                resetGame('local', difficulty, storedBoardSize);
-                setLocation('/');
-              }}
+              onClick={() => navigateWithCleanup('/')}
               className="bg-secondary text-secondary-foreground px-8 py-3 rounded-lg font-medium hover:bg-secondary/80 transition-colors"
             >
               Exit
@@ -404,24 +547,88 @@ export default function Game() {
           </div>
         )}
 
-        {/* Resign (online) */}
-        {mode === 'online' && !effectiveWinner && status === 'in_game' && (
-          <button
-            onClick={() => {
-              useOnlineStore.getState().resign();
-              clearOnlineSession();
-              resetGame('online', difficulty, storedBoardSize);
-              setLocation('/play');
-            }}
-            className="mt-8 text-xs text-muted-foreground hover:text-foreground transition-colors underline underline-offset-2"
-          >
-            Resign
-          </button>
+        {/* Resign & Exit buttons - visible during game for all modes */}
+        {!effectiveWinner && (
+          <div className="mt-8 flex gap-4 relative z-10">
+            {/* Resign button - show for AI and Online modes only */}
+            {mode !== 'local' && (
+              <button
+                onClick={() => setShowResignConfirm(true)}
+                className="text-xs text-red-400 hover:text-red-300 transition-colors underline underline-offset-2"
+              >
+                Resign
+              </button>
+            )}
+
+            {/* Exit button for all modes */}
+            <button
+              onClick={() => setShowExitConfirm(true)}
+              className="text-xs text-muted-foreground hover:text-foreground transition-colors underline underline-offset-2"
+            >
+              Exit Game
+            </button>
+          </div>
         )}
       </div>
 
+      {/* Resign confirmation dialog */}
+      {showResignConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+          <div className="bg-card border border-border rounded-2xl shadow-2xl max-w-sm w-full p-6">
+            <h3 className="text-xl font-bold mb-2">Resign Game?</h3>
+            <p className="text-sm text-muted-foreground mb-6">
+              {mode === 'online'
+                ? 'Are you sure you want to resign? This will count as a loss.'
+                : 'Are you sure you want to resign? The AI will win this game.'}
+            </p>
+            <div className="flex gap-3">
+              <button
+                onClick={handleResign}
+                className="flex-1 bg-red-500 hover:bg-red-600 text-white font-semibold py-3 rounded-lg transition-colors"
+              >
+                Yes, Resign
+              </button>
+              <button
+                onClick={() => setShowResignConfirm(false)}
+                className="flex-1 bg-secondary hover:bg-secondary/80 text-secondary-foreground font-semibold py-3 rounded-lg transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Exit confirmation dialog */}
+      {showExitConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+          <div className="bg-card border border-border rounded-2xl shadow-2xl max-w-sm w-full p-6">
+            <h3 className="text-xl font-bold mb-2">Exit Game?</h3>
+            <p className="text-sm text-muted-foreground mb-6">
+              {mode === 'online'
+                ? 'Are you sure you want to exit? This will count as a loss.'
+                : 'Are you sure you want to exit the game?'}
+            </p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => navigateWithCleanup('/')}
+                className="flex-1 bg-red-500 hover:bg-red-600 text-white font-semibold py-3 rounded-lg transition-colors"
+              >
+                Yes, Exit
+              </button>
+              <button
+                onClick={() => setShowExitConfirm(false)}
+                className="flex-1 bg-secondary hover:bg-secondary/80 text-secondary-foreground font-semibold py-3 rounded-lg transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <RulesModal open={rulesOpen} onClose={() => setRulesOpen(false)} />
-      
+
       {/* Rematch Modal */}
       <RematchModal
         open={!!rematchOffer}
@@ -435,8 +642,7 @@ export default function Game() {
           declineRematch();
           setRematchOffer(null);
           setIsWaitingForRematchResponse(false);
-          clearOnlineSession();
-          setLocation('/play');
+          navigateWithCleanup('/play');
         }}
       />
     </Layout>
