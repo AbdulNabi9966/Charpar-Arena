@@ -100,12 +100,25 @@ export const useOnlineStore = create<OnlineState>((set, get) => ({
 
     set({ status: 'connecting', error: null });
 
-    // ── USE ENVIRONMENT VARIABLE ──────────────────────────────────────────────
-    const API_URL = import.meta.env.VITE_API_URL || 'https://charpar-arena.onrender.com';
-    console.log('🔌 Connecting to Socket.IO server at:', API_URL);
+    // ── Determine Socket.IO URL ──────────────────────────────────────────────
+    // Development: empty string = relative path (Vite proxy handles it)
+    // Production: use environment variable or fallback
+    let socketUrl = '';
+    
+    if (import.meta.env.DEV) {
+      // Development: use Vite proxy
+      socketUrl = '';
+      console.log('🔌 Development mode: using Vite proxy');
+    } else {
+      // Production: use environment variable or fallback
+      socketUrl = import.meta.env.VITE_API_URL || 'https://charpar-arena.onrender.com';
+      console.log('🔌 Production mode: connecting to', socketUrl);
+    }
 
-    const socket = io(API_URL, {
-      path: '/api/socket.io',
+    console.log('🔌 Socket.IO URL:', socketUrl || '(relative - using proxy)');
+
+    const socket = io(socketUrl, {
+      path: '/socket.io',
       transports: ['websocket', 'polling'],
       reconnection: true,
       reconnectionAttempts: 15,
@@ -123,6 +136,7 @@ export const useOnlineStore = create<OnlineState>((set, get) => ({
         socket.emit('rejoin_game', { gameId: saved.gameId, userId, username });
       }
 
+      // Only reset to disconnected if we weren't already in_game
       const { status } = get();
       if (status !== 'in_game') {
         set({ status: 'disconnected' });
@@ -142,7 +156,6 @@ export const useOnlineStore = create<OnlineState>((set, get) => ({
       }
     });
 
-    // ── All other event handlers ──────────────────────────────────────────────
     socket.on('matched', (data: {
       gameId: string;
       playerNumber: 1 | 2;
@@ -261,6 +274,7 @@ export const useOnlineStore = create<OnlineState>((set, get) => ({
           isWaitingForRematch: false,
         });
       }
+      // Don't clear session immediately - allow rematch
     });
 
     socket.on('game_completed', (data: { gameId: string; winnerId: string; winnerUsername: string }) => {
@@ -342,6 +356,7 @@ export const useOnlineStore = create<OnlineState>((set, get) => ({
 
     console.log('♟️ Making move:', { from, to, gameId, playerNum });
 
+    // Optimistic update: apply the move locally for instant visual feedback
     const newBoard = [...gameState.board] as (1 | 2 | null)[];
     newBoard[to] = playerNum;
     if (from !== null) newBoard[from] = null;
@@ -356,7 +371,13 @@ export const useOnlineStore = create<OnlineState>((set, get) => ({
     const newPhase = gameState.phase === 'placement' && allPlaced ? 'movement' : gameState.phase;
 
     set({
-      gameState: { ...gameState, board: newBoard, piecesPlaced: newPiecesPlaced, currentPlayer: nextPlayer, phase: newPhase },
+      gameState: { 
+        ...gameState, 
+        board: newBoard, 
+        piecesPlaced: newPiecesPlaced, 
+        currentPlayer: nextPlayer, 
+        phase: newPhase 
+      },
       onlineSelected: null,
     });
 
