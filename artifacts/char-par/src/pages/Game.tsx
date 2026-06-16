@@ -238,6 +238,7 @@ export default function Game() {
     const { socket: s, status: st, gameId: currentGameId } = useOnlineStore.getState();
     
     if (!s?.connected) {
+      console.log('⏳ Socket not connected, waiting...');
       if (joinTimeoutRef.current) clearTimeout(joinTimeoutRef.current);
       joinTimeoutRef.current = setTimeout(() => {
         attemptJoinQueue(userId, username);
@@ -247,6 +248,12 @@ export default function Game() {
 
     if (st === 'in_game' || currentGameId) {
       console.log('⏭️ Already in game, skipping join');
+      return;
+    }
+
+    // Check if we're already in queue via the store
+    if (st === 'searching') {
+      console.log('⏭️ Already searching, skipping join');
       return;
     }
 
@@ -269,24 +276,16 @@ export default function Game() {
       const username = me?.username ?? 'Player';
       connect(userId, username, token ?? '');
 
-      // Wait for connection then attempt reconnection
+      // Wait for connection then attempt reconnection or join
       setTimeout(() => {
         if (!joinAttempted && status !== 'in_game' && !onlineGameId) {
           attemptReconnection(userId, username);
         }
       }, 1500);
 
-      // Fallback join
-      const fallbackTimer = setTimeout(() => {
-        const { status: st, gameId: currentGameId } = useOnlineStore.getState();
-        if (st !== 'in_game' && !currentGameId && !joinAttempted && !hasReconnected.current) {
-          console.log('⏰ Fallback: joining queue');
-          attemptJoinQueue(userId, username);
-        }
-      }, 5000);
+      // ── REMOVED: Fallback timer that was causing duplicate joins ────
 
       return () => {
-        clearTimeout(fallbackTimer);
         if (joinTimeoutRef.current) clearTimeout(joinTimeoutRef.current);
         if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
         if (mode === 'online') {
@@ -298,15 +297,22 @@ export default function Game() {
     }
   }, [userId]);
 
-  // ── Monitor socket connection ───────────────────────────────────────────
+  // ── Monitor socket connection and join when ready ───────────────────────
   useEffect(() => {
     if (mode !== 'online') return;
     if (!userId) return;
-    if (status === 'in_game' || onlineGameId || hasReconnected.current) return;
+    if (status === 'in_game' || onlineGameId || hasReconnected.current) {
+      console.log('⏭️ Already in game, not joining');
+      return;
+    }
+    if (joinAttempted) {
+      console.log('⏭️ Join already attempted, not joining');
+      return;
+    }
 
     const username = me?.username ?? 'Player';
     
-    if (socket?.connected && status === 'disconnected' && !joinAttempted) {
+    if (socket?.connected && status === 'disconnected') {
       console.log('🔌 Socket connected, joining queue');
       attemptJoinQueue(userId, username);
     }
@@ -316,7 +322,7 @@ export default function Game() {
   useEffect(() => {
     if (mode !== 'online') return;
 
-    const handleReconnected = (event: CustomEvent) => {
+    const handleReconnected = () => {
       console.log('✅ Reconnection successful');
       hasReconnected.current = true;
       setIsReconnecting(false);
