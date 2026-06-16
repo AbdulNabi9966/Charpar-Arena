@@ -77,6 +77,8 @@ export default function Game() {
   const gameIdRef = useRef<string | null>(null);
   const reconnectionAttempted = useRef(false);
   const joinTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const reconnectCount = useRef(0);
+  const reconnectTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   // ── Get the store's set function directly ────────────────────────────────
   const onlineStoreSet = useOnlineStore.setState;
@@ -115,10 +117,15 @@ export default function Game() {
     gameIdRef.current = null;
     reconnectionAttempted.current = false;
     setJoinAttempted(false);
+    reconnectCount.current = 0;
 
     if (joinTimeoutRef.current) {
       clearTimeout(joinTimeoutRef.current);
       joinTimeoutRef.current = null;
+    }
+    if (reconnectTimerRef.current) {
+      clearTimeout(reconnectTimerRef.current);
+      reconnectTimerRef.current = null;
     }
 
     setTimeout(() => {
@@ -181,7 +188,6 @@ export default function Game() {
 
   // ── Join queue with retry ────────────────────────────────────────────────
   const attemptJoinQueue = (userId: string, username: string) => {
-    // CRITICAL: Check if already in queue or game
     const { socket: s, status: st, gameId: currentGameId } = useOnlineStore.getState();
     
     if (joinAttempted || st === 'in_game' || currentGameId) {
@@ -207,17 +213,38 @@ export default function Game() {
     joinQueue(qmode, userId, username, boardSize);
   };
 
-  // ── Attempt reconnection ──────────────────────────────────────────────────
+  // ── Attempt reconnection with guard ──────────────────────────────────────
   const attemptReconnection = (userId: string, username: string) => {
-    if (reconnectionAttempted.current) return;
-    reconnectionAttempted.current = true;
+    // Prevent multiple reconnection attempts
+    if (reconnectionAttempted.current) {
+      console.log('⏭️ Reconnection already attempted, skipping');
+      return;
+    }
+
+    // Prevent reconnection loop - max 2 attempts
+    if (reconnectCount.current >= 2) {
+      console.log('⏭️ Max reconnection attempts reached, joining queue');
+      setJoinAttempted(false);
+      attemptJoinQueue(userId, username);
+      return;
+    }
 
     const saved = loadOnlineSession();
     console.log('💾 Saved session:', saved);
 
     if (saved && saved.userId === userId && saved.gameId) {
+      // Check if game is still active
+      const { gameState: currentGameState, status: currentStatus } = useOnlineStore.getState();
+      
+      // If we already have a game state and status is in_game, don't reconnect
+      if (currentStatus === 'in_game' && currentGameState) {
+        console.log('✅ Already in a game, no reconnection needed');
+        return;
+      }
+
       console.log('🔄 Found saved game, attempting to reconnect:', saved.gameId);
       setIsReconnecting(true);
+      reconnectCount.current += 1;
       
       const { socket: s } = useOnlineStore.getState();
       if (s?.connected) {
@@ -235,7 +262,11 @@ export default function Game() {
           opponent: saved.opponent,
         });
         
-        setTimeout(() => {
+        // Set a timeout to stop reconnection attempts
+        if (reconnectTimerRef.current) {
+          clearTimeout(reconnectTimerRef.current);
+        }
+        reconnectTimerRef.current = setTimeout(() => {
           setIsReconnecting(false);
           const { status: st, gameId: currentGameId } = useOnlineStore.getState();
           if (st !== 'in_game' && !currentGameId) {
@@ -263,6 +294,7 @@ export default function Game() {
     setIsCleaningUp(false);
     reconnectionAttempted.current = false;
     setJoinAttempted(false);
+    reconnectCount.current = 0;
 
     if (mode === 'local' || mode === 'ai') {
       if (initialized.current) {
@@ -313,6 +345,7 @@ export default function Game() {
         const { status: st, gameId: currentGameId } = useOnlineStore.getState();
         if (st !== 'in_game' && !currentGameId && !joinAttempted) {
           console.log('⏰ Fallback: forcing join queue');
+          setJoinAttempted(false);
           attemptJoinQueue(userId, username);
         }
       }, 5000);
@@ -321,6 +354,9 @@ export default function Game() {
         clearTimeout(fallbackTimer);
         if (joinTimeoutRef.current) {
           clearTimeout(joinTimeoutRef.current);
+        }
+        if (reconnectTimerRef.current) {
+          clearTimeout(reconnectTimerRef.current);
         }
         if (mode === 'online') {
           const { status: s } = useOnlineStore.getState();
@@ -355,6 +391,8 @@ export default function Game() {
     if (currentGameId && currentGameId !== gameIdRef.current) {
       console.log('🎮 Game ID changed:', currentGameId);
       gameIdRef.current = currentGameId;
+      // Reset reconnect count when a new game is joined
+      reconnectCount.current = 0;
     }
   }, [gameState]);
 
@@ -544,6 +582,16 @@ export default function Game() {
             </div>
             <h3 className="text-xl font-semibold mb-2">Reconnecting to game...</h3>
             <p className="text-sm text-muted-foreground">Please wait while we restore your game.</p>
+            <button
+              onClick={() => {
+                console.log('🔄 Manual reconnect attempt');
+                setJoinAttempted(false);
+                attemptJoinQueue(userId, me?.username ?? 'Player');
+              }}
+              className="mt-4 text-sm text-primary hover:underline"
+            >
+              Try rejoining queue
+            </button>
           </div>
         </div>
       </Layout>
