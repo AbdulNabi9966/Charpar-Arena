@@ -101,8 +101,6 @@ export const useOnlineStore = create<OnlineState>((set, get) => ({
     set({ status: 'connecting', error: null });
 
     // ── Determine Socket.IO URL ──────────────────────────────────────────────
-    // Development: empty string = relative path (Vite proxy handles it)
-    // Production: use environment variable or fallback
     let socketUrl = '';
     
     if (import.meta.env.DEV) {
@@ -114,8 +112,6 @@ export const useOnlineStore = create<OnlineState>((set, get) => ({
       socketUrl = import.meta.env.VITE_API_URL || 'https://charpar-arena.onrender.com';
       console.log('🔌 Production mode: connecting to', socketUrl);
     }
-
-    console.log('🔌 Socket.IO URL:', socketUrl || '(relative - using proxy)');
 
     const socket = io(socketUrl, {
       path: '/socket.io',
@@ -274,7 +270,6 @@ export const useOnlineStore = create<OnlineState>((set, get) => ({
           isWaitingForRematch: false,
         });
       }
-      // Don't clear session immediately - allow rematch
     });
 
     socket.on('game_completed', (data: { gameId: string; winnerId: string; winnerUsername: string }) => {
