@@ -20,19 +20,25 @@ if (Number.isNaN(port) || port <= 0) {
 
 const httpServer = createServer(app);
 
-// Get allowed origins from environment
+// ── Get allowed origins from environment ──────────────────────────────────────
 const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(",") || [
   "https://charpar-frontend.vercel.app",
+  "https://charpar-frontend-gj5wvbdfk-abdulnabi9966s-projects.vercel.app",
+  "http://localhost:3000",
+  "http://localhost:5173",
 ];
 
+// ── Socket.IO with proper CORS ─────────────────────────────────────────────────
+// Using '/socket.io' path (not '/api/socket.io') for simpler setup
 const io = new SocketIOServer(httpServer, {
-  path: "/api/socket.io",
+  path: "/socket.io",
   cors: {
     origin: allowedOrigins,
     methods: ["GET", "POST"],
     credentials: true,
   },
-  transports: ["websocket", "polling"],
+  transports: ["polling", "websocket"], // Polling first, then upgrade
+  allowEIO3: true,
 });
 
 setupSocketIO(io);
