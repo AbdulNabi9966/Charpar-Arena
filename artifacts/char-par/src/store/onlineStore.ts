@@ -104,35 +104,35 @@ export const useOnlineStore = create<OnlineState>((set, get) => ({
     let socketUrl = '';
     
     if (import.meta.env.DEV) {
-      // Development: use Vite proxy
       socketUrl = '';
       console.log('🔌 Development mode: using Vite proxy');
     } else {
-      // Production: use environment variable or fallback
       socketUrl = import.meta.env.VITE_API_URL || 'https://charpar-arena.onrender.com';
       console.log('🔌 Production mode: connecting to', socketUrl);
     }
 
+    // ── Force polling first, then upgrade to websocket ──────────────────────
     const socket = io(socketUrl, {
-      path: '/socket.io',
-      transports: ['websocket', 'polling'],
+      path: '/socket.io',  // Changed from '/api/socket.io' to match server
+      transports: ['polling', 'websocket'], // Polling first, then upgrade
       reconnection: true,
-      reconnectionAttempts: 15,
+      reconnectionAttempts: 20,
       reconnectionDelay: 1000,
+      reconnectionDelayMax: 5000,
+      timeout: 20000,
+      withCredentials: true,
     });
 
     socket.on('connect', () => {
       console.log('🔌 Socket connected successfully');
       socket.emit('register', { userId, username });
 
-      // If we have a saved session, try to rejoin that game first
       const saved = loadOnlineSession();
       if (saved && saved.userId === userId) {
         console.log('🔄 Found saved session, rejoining game:', saved.gameId);
         socket.emit('rejoin_game', { gameId: saved.gameId, userId, username });
       }
 
-      // Only reset to disconnected if we weren't already in_game
       const { status } = get();
       if (status !== 'in_game') {
         set({ status: 'disconnected' });
@@ -351,7 +351,6 @@ export const useOnlineStore = create<OnlineState>((set, get) => ({
 
     console.log('♟️ Making move:', { from, to, gameId, playerNum });
 
-    // Optimistic update: apply the move locally for instant visual feedback
     const newBoard = [...gameState.board] as (1 | 2 | null)[];
     newBoard[to] = playerNum;
     if (from !== null) newBoard[from] = null;
