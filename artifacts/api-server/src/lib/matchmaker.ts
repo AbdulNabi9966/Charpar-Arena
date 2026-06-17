@@ -167,26 +167,33 @@ async function finalizeGame(
   socketToGame.delete(game.player2SocketId);
 }
 
-function tryMatch(queue: QueueEntry[], mode: "casual" | "ranked", boardSize: BoardSize, io: Server): void {
+// ── IMPROVED tryMatch with logging ──────────────────────────────────────────
+function tryMatch(queue: QueueEntry[], mode: "casual" | "ranked", boardSize: BoardSize, io: Server): number {
+  let matchesFound = 0;
+  const initialLength = queue.length;
+  
   while (queue.length >= 2) {
     const p1 = queue.shift()!;
     const p2 = queue.shift()!;
 
     // Don't match the same user with themselves
     if (p1.userId === p2.userId) {
+      logger.warn({ userId: p1.userId }, "Skipping self-match");
       queue.unshift(p2);
       continue;
     }
 
     // Check if either player is already in a game
     if (isUserInActiveGame(p1.userId) || isUserInActiveGame(p2.userId)) {
+      logger.warn({ p1: p1.userId, p2: p2.userId }, "Player already in game, skipping");
       queue.unshift(p2);
       queue.unshift(p1);
       continue;
     }
 
+    matchesFound++;
     const gameId = crypto.randomUUID();
-    const state  = createInitialState(boardSize);
+    const state = createInitialState(boardSize);
 
     const game: ActiveGame = {
       gameId,
@@ -196,7 +203,10 @@ function tryMatch(queue: QueueEntry[], mode: "casual" | "ranked", boardSize: Boa
       player2Id: p2.userId,
       player1Username: p1.username,
       player2Username: p2.username,
-      mode, boardSize, state, startedAt: Date.now(),
+      mode,
+      boardSize,
+      state,
+      startedAt: Date.now(),
       status: "active",
     };
 
@@ -210,20 +220,47 @@ function tryMatch(queue: QueueEntry[], mode: "casual" | "ranked", boardSize: Boa
       gameId,
       playerNumber: 1,
       opponent: { id: p2.userId, username: p2.username },
-      state
+      state,
     };
     const matchedData2 = {
       gameId,
       playerNumber: 2,
       opponent: { id: p1.userId, username: p1.username },
-      state
+      state,
     };
 
     emitToUser(p1.userId, io, "matched", matchedData1);
     emitToUser(p2.userId, io, "matched", matchedData2);
 
-    logger.info({ gameId, p1: p1.userId, p2: p2.userId, mode, boardSize }, "Game matched");
+    logger.info({ gameId, p1: p1.userId, p2: p2.userId, mode, boardSize }, "🎮 Game matched!");
   }
+  
+  if (matchesFound > 0) {
+    logger.info({ mode, boardSize, matchesFound, remaining: queue.length }, "✅ Match(es) created");
+  } else if (initialLength > 0) {
+    logger.debug({ mode, boardSize, queueSize: queue.length }, "⏳ No match yet, waiting for more players");
+  }
+  
+  return matchesFound;
+}
+
+// ── FORCE MATCH CHECK - checks all queues ──────────────────────────────────
+function forceMatchCheck(io: Server): number {
+  let totalMatches = 0;
+  for (const [key, queue] of Object.entries(queues)) {
+    if (queue.length >= 2) {
+      const parts = key.split("-");
+      const mode = parts[0] as "casual" | "ranked";
+      const boardSize = parseInt(parts[1]) as BoardSize;
+      const before = queue.length;
+      const matches = tryMatch(queue, mode, boardSize, io);
+      totalMatches += matches;
+      if (matches > 0) {
+        logger.info({ key, before, after: queue.length }, `⚡ Match found in ${key}`);
+      }
+    }
+  }
+  return totalMatches;
 }
 
 function removeFromAllQueues(match: Partial<{ userId: string; socketId: string }>) {
@@ -238,6 +275,14 @@ function removeFromAllQueues(match: Partial<{ userId: string; socketId: string }
 }
 
 export function setupSocketIO(io: Server): void {
+  // ── BACKGROUND MATCHMAKING - runs every 2 seconds as fallback ──────────
+  const matchmakingInterval = setInterval(() => {
+    const matches = forceMatchCheck(io);
+    if (matches > 0) {
+      broadcastOnlineCounts(io);
+    }
+  }, 2000);
+
   io.on("connection", (socket: Socket) => {
     logger.info({ socketId: socket.id }, "Socket connected");
     broadcastOnlineCounts(io);
@@ -290,13 +335,12 @@ export function setupSocketIO(io: Server): void {
       username: string;
       boardSize?: BoardSize;
     }) => {
-      // Log the incoming request
       logger.info({ 
         socketId: socket.id, 
         userId: data.userId, 
         mode: data.mode, 
         boardSize: data.boardSize 
-      }, "Join queue request received");
+      }, "🎯 Join queue request received");
 
       if (joinInProgress) {
         socket.emit("queued", { 
@@ -340,8 +384,21 @@ export function setupSocketIO(io: Server): void {
       joinInProgress = true;
       socket.emit("queued", { position: queue.length, mode: data.mode, boardSize });
       
-      // Try to match
-      tryMatch(queue, data.mode, boardSize, io);
+      // ── IMMEDIATE MATCH ATTEMPT ──────────────────────────────────────────
+      // First try matching this specific queue
+      const matches = tryMatch(queue, data.mode, boardSize, io);
+      
+      // If no match found, try all queues (in case there are players in other queues)
+      if (matches === 0) {
+        // Small delay to allow other socket events to process
+        setTimeout(() => {
+          const totalMatches = forceMatchCheck(io);
+          if (totalMatches > 0) {
+            broadcastOnlineCounts(io);
+          }
+        }, 50);
+      }
+      
       broadcastOnlineCounts(io);
 
       setTimeout(() => {
@@ -567,5 +624,10 @@ export function setupSocketIO(io: Server): void {
       socketToUser.delete(socket.id);
       broadcastOnlineCounts(io);
     });
+  });
+
+  // ── Cleanup interval on server shutdown ──────────────────────────────────
+  io.engine.on("close", () => {
+    clearInterval(matchmakingInterval);
   });
 }
