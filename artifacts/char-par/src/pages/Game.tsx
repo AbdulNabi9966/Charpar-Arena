@@ -17,11 +17,11 @@ import { soundSystem } from '../lib/audio';
 export default function Game() {
   const [, setLocation] = useLocation();
   const searchParams = new URLSearchParams(window.location.search);
-  const mode       = searchParams.get('mode') || 'local';
+  const mode = searchParams.get('mode') || 'local';
   const difficulty = (searchParams.get('difficulty') || 'medium') as 'easy' | 'medium' | 'hard' | 'expert';
-  const qmode      = (searchParams.get('qmode') || 'casual') as 'casual' | 'ranked';
-  const rawSize    = parseInt(searchParams.get('boardSize') || '3', 10);
-  const boardSize  = ([3, 4, 5].includes(rawSize) ? rawSize : 3) as BoardSize;
+  const qmode = (searchParams.get('qmode') || 'casual') as 'casual' | 'ranked';
+  const rawSize = parseInt(searchParams.get('boardSize') || '3', 10);
+  const boardSize = ([3, 4, 5].includes(rawSize) ? rawSize : 3) as BoardSize;
 
   const {
     board, phase, currentPlayer, winner, winLine,
@@ -40,7 +40,7 @@ export default function Game() {
   const [rulesOpen, setRulesOpen] = useState(false);
   const [rematchOffer, setRematchOffer] = useState<{ from: string } | null>(null);
 
-  const aiPending   = useRef(false);
+  const aiPending = useRef(false);
   const initialized = useRef(false);
 
   // ── Rematch event listener ──────────────────────────────────────────────
@@ -67,7 +67,6 @@ export default function Game() {
 
   // ── Init ─────────────────────────────────────────────────────────────────
   useEffect(() => {
-    // Local / AI: initialize once; userId not needed
     if (mode === 'local' || mode === 'ai') {
       if (initialized.current) return;
       initialized.current = true;
@@ -81,21 +80,21 @@ export default function Game() {
       return;
     }
 
-    // Online: wait for userId (guest login is async); only initialize once
     if (mode === 'online') {
       if (initialized.current) return;
-      if (!userId) return; // userId not ready yet — effect will re-run when it arrives
+      if (!userId) return;
 
       initialized.current = true;
 
       const { status: cur, gameState: curGs } = useOnlineStore.getState();
-      if (cur === 'in_game' && curGs) return; // already in an active game
+      if (cur === 'in_game' && curGs) return;
 
       const username = me?.username ?? 'Player';
       connect(userId, username, token ?? '');
 
-      // After socket connects, allow 350 ms for 'reconnected' to arrive before
-      // joining the queue so a page-refresh mid-game reconnects cleanly.
+      // ── Fix: Always join queue after socket connects ────────────────────
+      // Previously this was blocked by a bug where saved?.userId === curUserId
+      // always returned true for the same user, silently skipping join_queue
       let joinScheduled = false;
       const scheduleJoin = (): boolean => {
         const { socket } = useOnlineStore.getState();
@@ -125,7 +124,7 @@ export default function Game() {
       }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [userId]); // re-run when userId arrives so online mode connects immediately
+  }, [userId]);
 
   // ── Save online session ──────────────────────────────────────────────────
   useEffect(() => {
