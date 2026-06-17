@@ -30,10 +30,11 @@ export default function Play() {
   const { data: me } = useGetMe({ query: { enabled: !!token, queryKey: ['auth', 'me'] } });
 
   const handleOnlinePlay = (mode: 'casual' | 'ranked') => {
-    // Pre-warm the socket connection so it is (likely) connected by the time
-    // Game.tsx mounts and calls joinQueue. Game.tsx owns all queue logic.
+    // Pre-warm the socket connection but DO NOT emit join_queue here.
+    // Game.tsx will handle the queue join after navigation.
     const currentUserId = userId ?? me?.id;
     if (currentUserId) {
+      console.log('🔌 Pre-connecting socket for user:', currentUserId);
       connect(currentUserId, me?.username ?? 'Player', token ?? '');
     }
     setLocation(`/game?mode=online&qmode=${mode}&boardSize=${boardSize}`);
